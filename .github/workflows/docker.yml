@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Compile Python
-        run: python -m py_compile migaku_games.py pipeline.py server.py config.py align.py tools/build_jmdict.py ocr/meiki_ocr.py tests/*.py
+        run: python -m py_compile migaku_games.py migaku_host/*.py pipeline.py server.py config.py align.py tools/build_jmdict.py ocr/meiki_ocr.py tests/*.py
       - uses: docker/setup-buildx-action@v3
       - name: Build image
         uses: docker/build-push-action@v6
@@ -44,9 +44,37 @@ jobs:
         if: always()
         run: docker logs migaku || true
 
+  # The hotkey client runs on the player's own machine: check it on several Linux distributions,
+  # bare and with desktop tools (tests/check_host_distro.sh).
+  host:
+    name: host (${{ matrix.image }}, ${{ matrix.tools }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["fedora:latest", "ubuntu:24.04", "debian:stable-slim", "archlinux:latest", "alpine:latest"]
+        tools: [none, desktop]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check
+        run: |
+          docker run --rm -v "$PWD:/src:ro" -w /src "${{ matrix.image }}" sh -c '
+            set -e
+            case "$0" in
+              fedora*) pm="dnf install -y -q"; base="python3"; extra="grim scrot xdotool libnotify";;
+              ubuntu*|debian*) apt-get update -qq; pm="apt-get install -y -qq --no-install-recommends"; base="python3"; extra="grim scrot xdotool libnotify-bin";;
+              arch*) pm="pacman -Sy --noconfirm --quiet --disable-sandbox"; base="python"; extra="grim scrot xdotool libnotify";;
+              alpine*) pm="apk add -q"; base="python3"; extra="grim scrot xdotool libnotify";;
+            esac
+            $pm $base
+            if [ "$1" = desktop ]; then $pm $extra; fi
+            tests/check_host_distro.sh "$1"' "${{ matrix.image }}" "${{ matrix.tools }}"
+
   # Images are published only for version tags (git tag v1.2.3 && git push --tags).
   publish:
-    needs: test
+    needs: [test, host]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

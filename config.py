@@ -27,6 +27,9 @@ ACTIONS = {
 MIGAKU_KEYS = {"e", "q", "1", "2", "3", "4", "u", "k", "i"}
 
 ENGINES = ("vision", "meiki")
+# Host-side backends (migaku_host/capture.py and window.py; tests/test_host.py keeps these in sync).
+CAPTURE_BACKENDS = ("auto", "screencapture", "windows", "spectacle", "gnome-screenshot", "grim", "maim", "scrot", "import")
+WINDOW_BACKENDS = ("auto", "jxa", "windows", "kwin", "sway", "hyprland", "xdotool", "follow")
 PROFILE_ID = re.compile(r"^[\w-]{1,40}$")
 
 
@@ -53,7 +56,20 @@ def parse(raw) -> tuple:
     warnings = []
     raw = {} if raw is None else _expect(raw, dict, "config")
     _only(raw, ("ocr_engine", "retention_hours", "copy_frame_on_card", "translation_colours", "active_profile",
-                "profiles", "keybindings"), "config")
+                "profiles", "keybindings", "host"), "config")
+
+    host = _expect(raw.get("host") or {}, dict, "host")
+    _only(host, ("capture", "window", "browser", "notifications"), "host")
+    host = {
+        "capture": str(host.get("capture", "auto")),
+        "window": str(host.get("window", "auto")),
+        "browser": str(_expect(host.get("browser") or "", str, "host.browser")).strip(),
+        "notifications": _expect(host.get("notifications", True), bool, "host.notifications"),
+    }
+    if host["capture"] not in CAPTURE_BACKENDS:
+        raise ConfigError(f"host.capture: one of {', '.join(CAPTURE_BACKENDS)}, got {host['capture']!r}")
+    if host["window"] not in WINDOW_BACKENDS:
+        raise ConfigError(f"host.window: one of {', '.join(WINDOW_BACKENDS)}, got {host['window']!r}")
 
     engine = raw.get("ocr_engine")
     if engine is not None and engine not in ENGINES:
@@ -110,6 +126,7 @@ def parse(raw) -> tuple:
         "active_profile": active,
         "profiles": profiles,
         "keybindings": keys,
+        "host": host,
     }, warnings
 
 

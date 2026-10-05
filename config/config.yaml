@@ -39,6 +39,20 @@ profiles:
   #   freeze: true
   #   process: duckstation
 
+# The hotkey client (migaku_games.py) on this machine. "auto" picks per desktop; run
+# `python3 migaku_games.py --doctor` to see what it picks and what's installed.
+host:
+  # Screenshots: auto, screencapture (macOS), windows, spectacle (KDE), gnome-screenshot, grim
+  # (Sway/Hyprland), maim, scrot, import (X11).
+  capture: auto
+  # Raising/hiding the live window: auto, jxa (macOS), windows, kwin (KDE), sway, hyprland,
+  # xdotool (X11), or follow (don't touch windows; switch to the live window yourself).
+  window: auto
+  # Browser command for the live window; empty finds Brave. E.g. "flatpak run com.brave.Browser".
+  browser: ""
+  # Desktop notifications for progress; errors are always notified.
+  notifications: true
+
 # Viewer shortcuts (KeyboardEvent.key values). Unlisted actions keep their defaults:
 #   translate: y            translate the hovered dialogue box
 #   translate_all: t        translate every dialogue box

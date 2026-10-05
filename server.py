@@ -29,7 +29,10 @@ API
 """
 import argparse
 import io
+from datetime import datetime
 import json
+import logging
+import logging.handlers
 import os
 import re
 import shutil
@@ -50,6 +53,35 @@ ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
 FRAME_ID = re.compile(r"^\d{8}-\d{6}(-\d{3})?$")
 MAX_UPLOAD = 50 * 1024 * 1024
+log = logging.getLogger("server")
+
+
+class IsoFormatter(logging.Formatter):
+    """ISO 8601 timestamps with milliseconds and UTC offset, so host and server logs line up."""
+
+    def formatTime(self, record, datefmt=None):
+        return datetime.fromtimestamp(record.created).astimezone().isoformat(timespec="milliseconds")
+
+
+def setup_logging(data: Path) -> Path:
+    """stdout (docker compose logs) and data/logs/server.log (readable from the host's ./data).
+    MIGAKU_LOG_LEVEL=DEBUG also logs every GET, including the viewer's polling."""
+    level = getattr(logging, os.environ.get("MIGAKU_LOG_LEVEL", "INFO").upper(), logging.INFO)
+    fmt = IsoFormatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+    root = logging.getLogger()
+    root.setLevel(level)
+    console = logging.StreamHandler(sys.stdout)
+    console.setFormatter(fmt)
+    root.addHandler(console)
+    path = data / "logs" / "server.log"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fh = logging.handlers.RotatingFileHandler(path, maxBytes=5_000_000, backupCount=3, encoding="utf-8")
+        fh.setFormatter(fmt)
+        root.addHandler(fh)
+    except OSError as e:
+        log.warning("can't write %s: %s", path, e)
+    return path
 PRUNE_EVERY = 600  # seconds
 
 
@@ -76,7 +108,7 @@ class Store:
         # Newest frame, and the live viewer's state; the condition wakes waiting viewers.
         self.cond = threading.Condition()
         self.latest = self.newest()
-        self.live = {"seen": 0.0, "waiting": 0, "focused": False, "frame": None}
+        self.live = {"seen": 0.0, "waiting": 0, "focused": False, "frame": None, "shown": False}
         # The declarative config. A file that fails to load at start leaves the defaults in
         # place and the error on show in the web UI; a failed reload keeps the previous config.
         self.config, self.config_warnings, self.config_error = parse(None)[0], [], None
@@ -85,7 +117,7 @@ class Store:
             self.reload_config()
         except ConfigError as e:
             self.config_error = str(e)
-            print(f"config: {e}", file=sys.stderr, flush=True)
+            log.error("config: %s (using defaults)", e)
 
     # --- config ---------------------------------------------------------------------
     def reload_config(self) -> None:
@@ -93,8 +125,9 @@ class Store:
         config, warnings = load_config(self.config_path)
         self.config, self.config_warnings, self.config_error = config, warnings, None
         self.config_loaded = time.time()
+        log.info("config: loaded %s", self.config_path)
         for w in warnings:
-            print(f"config: {w}", flush=True)
+            log.warning("config: %s", w)
 
     @property
     def engine(self) -> str:
@@ -164,12 +197,17 @@ class Store:
 
     def run_ocr(self, frame_id: str, engine: str, meta: dict) -> None:
         frame = self.frames / frame_id
+        start = time.monotonic()
         try:
             with self.ocr_lock:
+                waited = time.monotonic() - start
                 data = pipeline.ocr(frame / "shot.png", engine)
+            log.info("ocr %s: %s, %d lines in %d blocks, %d ms (+%d ms queued) %s", frame_id, engine, len(data["lines"]),
+                     len(data["blocks"]), (time.monotonic() - start - waited) * 1000, waited * 1000,
+                     [l["text"] for l in data["lines"]][:6])
         except Exception as e:
             data = {"engine": engine, "lines": [], "blocks": [], "error": str(e)}
-            print(f"ocr {frame_id}: {e}", file=sys.stderr, flush=True)
+            log.exception("ocr %s (%s) failed", frame_id, engine)
         write_json(frame / "ocr.json", {**data, **meta})
         self.pending.pop(frame_id).set()
 
@@ -186,8 +224,23 @@ class Store:
             self.latest = frame_id
             self.cond.notify_all()
 
-    def report_live(self, focused, frame) -> None:
-        self.live.update(seen=time.time(), focused=bool(focused), frame=frame or None)
+    def report_live(self, body: dict) -> None:
+        """The viewer reports focus/visibility/frame; the hotkey client reports shown. A viewer
+        that's been minimised or hidden isn't shown any more, however it got there."""
+        before = dict(self.live)
+        if "focused" in body:
+            self.live["focused"] = bool(body["focused"])
+        if "frame" in body:
+            self.live["frame"] = body["frame"] or None
+        if "shown" in body:
+            self.live["shown"] = bool(body["shown"])
+        if body.get("visible") is False:
+            self.live["shown"] = False
+        if "visible" in body or "focused" in body:
+            self.live["seen"] = time.time()
+        changed = {k: v for k, v in self.live.items() if before.get(k) != v and k != "seen"}
+        if changed:
+            log.info("live: %s (from %s)", changed, body)
 
     def wait_latest(self, after: str, timeout: float = 25):
         with self.cond:
@@ -202,7 +255,8 @@ class Store:
     def live_state(self) -> dict:
         # Open while it has a request waiting here, or reported in the last few seconds.
         is_open = self.live["waiting"] > 0 or time.time() - self.live["seen"] < 5
-        return {"open": is_open, "focused": is_open and self.live["focused"], "frame": self.live["frame"]}
+        return {"open": is_open, "focused": is_open and self.live["focused"], "frame": self.live["frame"],
+                "shown": is_open and self.live["shown"]}
 
     # --- listing --------------------------------------------------------------------
     def ocr_summary(self, frame: Path) -> dict:
@@ -260,7 +314,7 @@ class Store:
             self.summaries.pop(frame_id, None)
         if expired:
             self.set_latest(self.newest())
-            print(f"retention: removed {len(expired)} frame(s)", flush=True)
+            log.info("retention: removed %d frame(s)", len(expired))
         return len(expired)
 
 
@@ -282,7 +336,7 @@ class Words:
                     self.aligner = Aligner(path)
                 except Exception as e:  # ImportError (no Janome) or the missing table
                     self.error = f"word matching unavailable: {e}"
-                    print(self.error, file=sys.stderr, flush=True)
+                    log.warning("%s", self.error)
             if self.error:
                 return {"pairs": [], "error": self.error}
             return {"pairs": self.aligner.align(ja, en)}
@@ -320,8 +374,10 @@ class Handler(SimpleHTTPRequestHandler):
             except KeyError:
                 self.send_json({"error": "frame not found"}, 404)
             except (ValueError, pipeline.OcrError) as e:
+                log.warning("%s %s: %s", self.command, self.path, e)
                 self.send_json({"error": str(e)}, 400)
             except Exception as e:  # keep the server up; report to the client
+                log.exception("%s %s failed", self.command, self.path)
                 self.send_json({"error": f"{type(e).__name__}: {e}"}, 500)
         return wrapper
 
@@ -370,15 +426,14 @@ class Handler(SimpleHTTPRequestHandler):
             self.store.prune()  # retention may have changed
             return self.send_json(self.store.config_state())
         if path == "/api/live":
-            body = json.loads(self.read_body() or b"{}")
-            self.store.report_live(body.get("focused"), body.get("frame"))
+            self.store.report_live(json.loads(self.read_body() or b"{}"))
             self.send_response(204)
             return self.end_headers()
         if path == "/api/align":
             body = json.loads(self.read_body() or b"{}")
             return self.send_json(self.words.align(str(body.get("ja", ""))[:1000], str(body.get("en", ""))[:2000]))
         if path == "/api/log":
-            print(f"page: {self.read_body()[:500].decode(errors='replace')}", flush=True)
+            logging.getLogger("viewer").info("%s", self.read_body()[:2000].decode(errors="replace"))
             self.send_response(204)
             return self.end_headers()
         if path == "/debug":
@@ -407,11 +462,19 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({"ok": True})
         self.send_error(404)
 
-    def log_message(self, fmt, *args) -> None:
-        # Skip the noisy static/polling requests; keep API writes and errors.
-        if self.command == "GET" and not str(args[1] if len(args) > 1 else "").startswith(("4", "5")):
-            return
-        super().log_message(fmt, *args)
+    def parse_request(self):
+        self.started = time.monotonic()
+        return super().parse_request()
+
+    def log_request(self, code="-", size="-") -> None:
+        # API writes and errors at INFO; GETs (pages, polling, long-polls) only at DEBUG.
+        status = getattr(code, "value", code)
+        ms = (time.monotonic() - getattr(self, "started", time.monotonic())) * 1000
+        level = logging.INFO if self.command != "GET" or str(status).startswith(("4", "5")) else logging.DEBUG
+        log.log(level, "%s %s -> %s (%d ms)", self.command, self.path[:200], status, ms)
+
+    def log_message(self, fmt, *args) -> None:  # anything else BaseHTTPRequestHandler reports
+        log.warning("http: " + fmt, *args)
 
 
 def prune_loop(store: Store) -> None:
@@ -419,7 +482,7 @@ def prune_loop(store: Store) -> None:
         try:
             store.prune()
         except Exception as e:
-            print(f"retention: {e}", file=sys.stderr, flush=True)
+            log.exception("retention: %s", e)
         time.sleep(PRUNE_EVERY)
 
 
@@ -434,12 +497,15 @@ def main() -> None:
                    help="the YAML config file (retention, profiles, keybindings, ...)")
     args = p.parse_args()
 
+    log_path = setup_logging(args.data.resolve())
+    log.info("starting: python %s, data=%s, log=%s, level=%s", sys.version.split()[0], args.data.resolve(), log_path,
+             logging.getLevelName(logging.getLogger().level))
     store = Store(args.data.resolve(), args.ocr, args.config)
     Handler.store = store
     threading.Thread(target=prune_loop, args=(store,), daemon=True).start()
     server = ThreadingHTTPServer((args.host, args.port), partial(Handler, directory=str(WEB)))
-    print(f"serving on http://{args.host}:{args.port}  ocr={store.engine}  data={store.data}  "
-          f"config={args.config}  retention={store.retention_hours():g}h", flush=True)
+    log.info("serving on http://%s:%d  ocr=%s  config=%s  retention=%gh", args.host, args.port, store.engine,
+             args.config, store.retention_hours())
     try:
         server.serve_forever()
     except KeyboardInterrupt:

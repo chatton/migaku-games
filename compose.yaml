@@ -15,5 +15,5 @@ services:
       - ./web:/app/web:ro       # live UI edits without a rebuild
     security_opt:
       - label=disable   # SELinux (Bazzite/Fedora): allow the bind mounts without relabelling them
-    restart: unless-stopped
+    restart: always   # "always": rootless podman (podman-restart.service) only restarts these after a reboot
 

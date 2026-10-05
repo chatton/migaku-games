@@ -66,7 +66,13 @@ def main():
         print(f"ok   async upload + OCR wait ({time.time() - t:.1f}s)")
 
         assert call("GET", "/api/latest?after=x")["id"] == frame["id"]
-        assert set(call("GET", "/api/live")) == {"open", "focused", "frame"}
+        assert set(call("GET", "/api/live")) == {"open", "focused", "frame", "shown"}
+        # The hotkey marks the overlay shown; the viewer being minimised/hidden clears it.
+        call("POST", "/api/live", {"focused": True, "visible": True}, 204)
+        call("POST", "/api/live", {"shown": True}, 204)
+        assert call("GET", "/api/live")["shown"] is True
+        call("POST", "/api/live", {"focused": False, "visible": False}, 204)
+        assert call("GET", "/api/live")["shown"] is False
         listed = {f["id"]: f for f in call("GET", "/api/frames")}
         assert listed[created[0]]["game"] == "smoke"
         print("ok   latest / live / list")

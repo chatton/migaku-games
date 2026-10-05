@@ -170,11 +170,12 @@ const params = new URLSearchParams(location.search);
 // ?debug: post script errors, and the overlay/Migaku DOM a few seconds after each frame (or on
 // the ` key), to the server's data/debug/dom.html. A dev aid; off by default.
 const debug = params.has("debug");
-if (debug) {
-  const reportError = (msg) => fetch("/debug", { method: "POST", body: "ERROR " + msg }).catch(() => {});
-  addEventListener("error", (e) => reportError(`${e.message} @${e.lineno}:${e.colno}`));
-  addEventListener("unhandledrejection", (e) => reportError(String(e.reason && e.reason.stack || e.reason)));
-}
+// Page errors and notable events go to the server log (docker compose logs / data/logs/server.log).
+const serverLog = (msg) => fetch("/api/log", { method: "POST", body: `${params.has("live") ? "live" : "viewer"}: ${msg}` }).catch(() => {});
+addEventListener("error", (e) => serverLog(`error: ${e.message} @${e.lineno}:${e.colno} ${e.error?.stack || ""}`));
+addEventListener("unhandledrejection", (e) => serverLog(`unhandled: ${e.reason?.stack || e.reason}`));
+// Is Migaku active on this page? (Not authorised for the site, or not installed, is a common snag.)
+setTimeout(() => serverLog(`loaded; Migaku ${document.getElementById("MigakuShadowDom") ? "active" : "NOT active (authorise it for this site?)"}; ${navigator.userAgent}`), 5000);
 const live = params.has("live");
 let frame = params.get("frame");
 let dims = null;  // picture size, known before OCR finishes
@@ -334,7 +335,7 @@ async function toggleTranslation(block) {
     layout();
   } catch (err) {
     cap.dataset.label = "⚠ " + err.message;
-    fetch("/api/log", { method: "POST", body: `translation failed: ${err.stack || err}` }).catch(() => {});
+    serverLog(`translation failed: ${err.stack || err}`);
   } finally {
     block.tlBtn.classList.remove("busy");
   }
@@ -472,6 +473,8 @@ async function show(id) {
   if (token !== showToken) return;
   ocr = data;
   build();
+  if (data.error) serverLog(`frame ${id}: OCR failed: ${data.error}`);
+  if (live) notice(data.error ? `OCR failed: ${data.error}` : data.blocks.length ? "" : "No text found in this frame");
 }
 
 function setStatus(when, info, busy) {
@@ -718,7 +721,8 @@ function reportLive() {
   if (!live) return;
   setTimeout(() => {
     const focused = document.hasFocus() && !document.hidden;
-    fetch("/api/live", { method: "POST", body: JSON.stringify({ focused, frame: rendered }) }).catch(() => {});
+    fetch("/api/live", { method: "POST", body: JSON.stringify({ focused, visible: !document.hidden, frame: rendered }) })
+      .catch(() => {});
   });
 }
 if (live) {
