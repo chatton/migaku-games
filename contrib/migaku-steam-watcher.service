@@ -1,0 +1,16 @@
+# Runs steam_watcher.py at login (Game Mode and Desktop Mode). Assumes the repo is at
+# ~/migaku-games; edit WorkingDirectory if not. Install:
+#   mkdir -p ~/.config/systemd/user && cp contrib/migaku-steam-watcher.service ~/.config/systemd/user/
+#   systemctl --user enable --now migaku-steam-watcher
+# Logs: journalctl --user -u migaku-steam-watcher -f
+[Unit]
+Description=migaku-games: OCR new Steam screenshots
+
+[Service]
+WorkingDirectory=%h/migaku-games
+ExecStart=/usr/bin/python3 steam_watcher.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

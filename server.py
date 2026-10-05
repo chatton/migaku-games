@@ -13,7 +13,7 @@ API
   GET    /api/config                     engine, engines, retention_hours
   PUT    /api/config                     {"retention_hours": N}
   GET    /api/frames                     newest first
-  POST   /api/frames[?ocr=ENGINE]        body: image bytes -> {"id", "url"}
+  POST   /api/frames[?ocr=ENGINE&game=NAME]  body: image bytes -> {"id", "url"}
   PUT    /api/frames/<id>/pin            {"pinned": true|false}
   DELETE /api/frames/<id>
   POST   /debug                          viewer posts its DOM here (dev aid)
@@ -30,6 +30,7 @@ import time
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qsl
 
 from PIL import Image
 
@@ -75,7 +76,7 @@ class Store:
             raise KeyError(frame_id)
         return p
 
-    def add(self, image_bytes: bytes, engine: str) -> dict:
+    def add(self, image_bytes: bytes, engine: str, game: str = "") -> dict:
         with self.lock:  # one id per millisecond, and one OCR process at a time
             now = time.time()
             frame_id = time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + f"-{int(now * 1000) % 1000:03d}"
@@ -93,6 +94,8 @@ class Store:
                 shutil.rmtree(frame, ignore_errors=True)
                 raise
             data["created"] = now
+            if game:
+                data["game"] = game
             (frame / "ocr.json").write_text(json.dumps(data, ensure_ascii=False, indent=2))
         return {"id": frame_id, "lines": [l["text"] for l in data["lines"]]}
 
@@ -111,6 +114,7 @@ class Store:
             "id": frame.name,
             "created": created,
             "engine": data.get("engine", "vision"),
+            "game": data.get("game", ""),
             "lines": len(data.get("lines", [])),
             "preview": preview,
             "pinned": pinned,
@@ -163,7 +167,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def route(self):
         path, _, query = self.path.partition("?")
-        params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
+        params = dict(parse_qsl(query))
         return path.rstrip("/") or "/", params
 
     def handle_errors(fn):
@@ -201,7 +205,7 @@ class Handler(SimpleHTTPRequestHandler):
         path, params = self.route()
         if path == "/api/frames":
             engine = params.get("ocr") or self.store.engine
-            result = self.store.add(self.read_body(), engine)
+            result = self.store.add(self.read_body(), engine, params.get("game", "")[:100])
             result["url"] = f"/viewer.html?frame={result['id']}"
             return self.send_json(result, 201)
         if path == "/debug":

@@ -18,6 +18,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -74,8 +75,9 @@ def start_container(server: str) -> None:
     sys.exit("frame server container did not come up; see `docker compose logs`")
 
 
-def upload(server: str, image: Path, engine) -> dict:
-    url = server + "/api/frames" + (f"?ocr={engine}" if engine else "")
+def upload(server: str, image: Path, engine, game=None) -> dict:
+    query = urllib.parse.urlencode({k: v for k, v in (("ocr", engine), ("game", game)) if v})
+    url = server + "/api/frames" + (f"?{query}" if query else "")
     req = urllib.request.Request(url, data=image.read_bytes(), method="POST",
                                  headers={"Content-Type": "application/octet-stream"})
     try:
@@ -114,6 +116,7 @@ def main() -> None:
     p.add_argument("--full", action="store_true", help="capture the whole screen instead of a region")
     p.add_argument("--app", action="store_true", help="open in a chromeless Brave app window")
     p.add_argument("--ocr", choices=["vision", "meiki"], help="OCR engine (default: the server's; the container has meiki only)")
+    p.add_argument("--game", help="tag the frame with this game name")
     p.add_argument("--server", default=DEFAULT_SERVER, help=f"frame server (default {DEFAULT_SERVER})")
     p.add_argument("--no-open", action="store_true", help="don't open the viewer")
     args = p.parse_args()
@@ -138,7 +141,7 @@ def main() -> None:
             copy_image_to_clipboard(png)
         else:
             copy_image_to_clipboard(shot)
-        frame = upload(server, shot, args.ocr)
+        frame = upload(server, shot, args.ocr, args.game)
 
     for line in frame["lines"] or ["(no text found)"]:
         print(f"  {line}")

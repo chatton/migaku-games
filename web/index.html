@@ -57,6 +57,7 @@
   <h1>Migaku Frames</h1>
   <span class="meta" id="count"></span>
   <span class="spacer"></span>
+  <label>Game <select id="game"><option value="">All</option></select></label>
   <label>OCR <select id="engine"></select></label>
   <label>Keep frames <input type="number" id="retention" min="0" step="1"> hours</label>
   <span class="meta">(0 = forever · pinned frames are always kept)</span>
@@ -98,10 +99,15 @@ function expiresIn(t) {
 
 let lastJson = "";
 async function refresh() {
-  const frames = await api("/api/frames");
-  const json = JSON.stringify(frames);
+  const all = await api("/api/frames");
+  const json = JSON.stringify(all) + $("game").value;
   if (json === lastJson) return;
   lastJson = json;
+  // Game filter: the games present, keeping the current choice.
+  const games = [...new Set(all.map((f) => f.game).filter(Boolean))].sort();
+  const chosen = $("game").value;
+  $("game").replaceChildren(new Option("All", ""), ...games.map((g) => new Option(g, g, false, g === chosen)));
+  const frames = chosen ? all.filter((f) => f.game === chosen) : all;
   $("count").textContent = `${frames.length} frame${frames.length === 1 ? "" : "s"}`;
   $("empty").hidden = frames.length > 0;
   const grid = $("grid");
@@ -113,7 +119,7 @@ async function refresh() {
       <a class="thumb" href="${url}"></a>
       <div class="body">
         <div class="preview" lang="ja"></div>
-        <div class="row"><span>${ago(f.created)} · ${f.engine} · ${f.lines} lines</span></div>
+        <div class="row"><span class="info"></span></div>
         <div class="row">
           <span>${expiresIn(f.expires)}</span><span class="spacer"></span>
           <button class="pin ${f.pinned ? "pin-on" : ""}">${f.pinned ? "Pinned" : "Pin"}</button>
@@ -122,6 +128,7 @@ async function refresh() {
       </div>`;
     card.querySelector(".thumb").style.backgroundImage = `url(/frames/${f.id}/shot.png)`;
     card.querySelector(".preview").textContent = f.preview || "(no text)";
+    card.querySelector(".info").textContent = [f.game, ago(f.created), f.engine, `${f.lines} lines`].filter(Boolean).join(" · ");
     card.querySelector(".pin").onclick = async () => {
       await api(`/api/frames/${f.id}/pin`, { method: "PUT", body: JSON.stringify({ pinned: !f.pinned }) });
       refresh();
@@ -171,6 +178,7 @@ addEventListener("paste", (e) => uploadFile([...e.clipboardData.files][0]));
 $("pick").onclick = () => $("file").click();
 $("file").onchange = () => uploadFile($("file").files[0]);
 
+$("game").onchange = refresh;
 loadConfig();
 refresh();
 setInterval(refresh, 5000);  // new captures from the hotkey/CLI show up on their own

@@ -20,6 +20,21 @@ python3 migaku_games.py --app            # chromeless Brave window
 python3 make_test_image.py               # synthetic samples into samples/
 ```
 
+## Steam screenshots (Bazzite Game Mode)
+
+Desktop capture tools can't see games in Game Mode, but Steam's own screenshot (F12, or a
+controller button mapped in Steam Input) works everywhere. `steam_watcher.py` watches Steam's
+screenshot folders and uploads each new shot, tagged with the game's name:
+
+```sh
+python3 steam_watcher.py                 # watch all Steam accounts' screenshots
+python3 steam_watcher.py --open          # and open each new frame in Brave
+python3 steam_watcher.py --dir ~/shots --game "FF8"   # any folder, any screenshot tool
+```
+
+Screenshots already there at start are skipped. To run it at login, see
+`contrib/migaku-steam-watcher.service`. The gallery can filter frames by game.
+
 ## Web UI
 
 - `/` lists frames (newest first, refreshes itself): open, pin, delete, or drop/paste an image
