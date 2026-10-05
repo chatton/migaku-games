@@ -18,7 +18,7 @@ import sys
 import time
 from pathlib import Path
 
-from migaku_games import DEFAULT_SERVER, open_browser, server_up, start_container, upload
+from migaku_games import DEFAULT_SERVER, ENGINES, AppError, ensure_server, open_browser, upload
 
 HOME = Path.home()
 STEAM_ROOTS = [
@@ -80,17 +80,6 @@ def scan(roots: list, dirs: list) -> dict:
     return found
 
 
-def wait_for_server(server: str) -> None:
-    """In compose the server may still be starting; keep trying instead of exiting."""
-    for attempt in range(120):
-        if server_up(server):
-            return
-        if attempt == 0:
-            print(f"waiting for the frame server at {server} ...", flush=True)
-        time.sleep(1)
-    sys.exit(f"no frame server at {server}")
-
-
 def settled(path: Path, sizes: dict) -> bool:
     """True once the file's size has stopped changing between polls (Steam writes in chunks)."""
     try:
@@ -109,9 +98,9 @@ def main() -> None:
     p.add_argument("--steam", type=Path, action="append", default=[],
                    help="Steam install folder (repeatable; default: the usual native/Flatpak/macOS paths)")
     p.add_argument("--game", help="game tag for frames from --dir folders")
-    p.add_argument("--open", action="store_true", help="open each new frame in Brave")
+    p.add_argument("--open", action="store_true", help="open each new frame in Brave (host only, not in compose)")
     p.add_argument("--app", action="store_true", help="with --open: chromeless Brave app window")
-    p.add_argument("--ocr", choices=["vision", "meiki"], help="OCR engine (default: the server's)")
+    p.add_argument("--ocr", choices=ENGINES, help="OCR engine (default: the server's)")
     p.add_argument("--server", default=DEFAULT_SERVER, help=f"frame server (default {DEFAULT_SERVER})")
     args = p.parse_args()
     server = args.server.rstrip("/")
@@ -125,16 +114,15 @@ def main() -> None:
     if not dirs and not roots:
         sys.exit("no Steam install found (looked in " + ", ".join(str(r) for r in candidates) + "); use --steam or --dir")
 
-    if server_up(server):
-        pass
-    elif server == DEFAULT_SERVER:
-        start_container(server)
-    else:
-        wait_for_server(server)
+    try:
+        ensure_server(server)
+    except AppError as e:
+        sys.exit(str(e))
 
     names = game_names(roots)
+    unnamed = set()  # app ids with no manifest (non-Steam shortcuts): don't re-read them all each time
     seen = set(scan(roots, dirs))
-    pending, sizes = {}, {}
+    sizes = {}
     print("watching " + ", ".join(str(x) for x in (dirs or roots)) + f"  ({len(seen)} existing screenshots skipped)", flush=True)
 
     while True:
@@ -144,21 +132,21 @@ def main() -> None:
         except OSError as e:  # a folder vanished mid-scan; try again next poll
             print(f"scan: {e}", file=sys.stderr, flush=True)
             continue
+        for f in sizes.keys() - current.keys():  # gone before it finished writing
+            del sizes[f]
         for f, appid in current.items():
-            if f not in seen:
-                pending[f] = appid
-        for f, appid in list(pending.items()):
-            if not settled(f, sizes):
+            if f in seen or not settled(f, sizes):
                 continue
-            del pending[f]
-            sizes.pop(f, None)
+            del sizes[f]
             seen.add(f)
-            if appid and appid not in names:
+            if appid and appid not in names and appid not in unnamed:
                 names.update(game_names(roots))  # a game installed since the watcher started
+                if appid not in names:
+                    unnamed.add(appid)
             game = args.game if appid is None else names.get(appid, f"app {appid}")
             try:
                 frame = upload(server, f, args.ocr, game)
-            except SystemExit as e:  # upload() exits on server errors; the watcher keeps going
+            except AppError as e:
                 print(f"{f.name}: {e}", file=sys.stderr, flush=True)
                 continue
             except OSError as e:

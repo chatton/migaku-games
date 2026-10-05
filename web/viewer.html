@@ -155,6 +155,7 @@
         search in the card creator's settings to skip Migaku's stock image. The frame is on your clipboard too.</p>
     </div>
   </div>
+<script src="/common.js"></script>
 <script>
 const params = new URLSearchParams(location.search);
 // ?debug: post script errors, and the overlay/Migaku DOM a few seconds after each frame (or on
@@ -170,7 +171,7 @@ let frame = params.get("frame");
 let dims = null;  // picture size, known before OCR finishes
 const stage = document.getElementById("stage");
 const overlay = document.getElementById("overlay");
-const img = document.getElementById("shot");
+const picture = document.getElementById("shot");  // iframe holding picture.html
 let ocr;
 
 // Box of the first visible glyph in a line, skipping Migaku's furigana and spacers.
@@ -188,6 +189,8 @@ function firstGlyphRect(el) {
   return range.getBoundingClientRect();
 }
 
+const measureCtx = document.createElement("canvas").getContext("2d");
+
 function layout() {
   if (!dims) return;
   const wrap = document.getElementById("stage-wrap").getBoundingClientRect();
@@ -198,19 +201,18 @@ function layout() {
   // Font size per line is chosen so its natural width matches the OCR box (no transforms:
   // Migaku positions its highlights from the untransformed layout). Measured on a canvas
   // so Migaku's DOM changes don't affect it.
-  const ctx = document.createElement("canvas").getContext("2d");
-  ctx.font = `100px ${getComputedStyle(document.body).fontFamily}`;
+  measureCtx.font = `100px ${getComputedStyle(document.body).fontFamily}`;
   const lines = [...stage.querySelectorAll(".line")];
   for (const el of lines) {
-    const l = JSON.parse(el.dataset.box);
-    el.style.fontSize = Math.min(100 * l.w * W / (ctx.measureText(l.text).width || 1), l.h * H) + "px";
+    const l = el.box;
+    el.style.fontSize = Math.min(100 * l.w * W / (measureCtx.measureText(l.text).width || 1), l.h * H) + "px";
     el.style.left = el.style.top = "0px";
   }
   // Then measure where each line's first glyph actually landed and shift it onto its box.
   // Measure everything before moving anything: relative offsets don't affect flow.
   const origin = stage.getBoundingClientRect();
   const moves = lines.map((el) => {
-    const l = JSON.parse(el.dataset.box), r = firstGlyphRect(el);
+    const l = el.box, r = firstGlyphRect(el);
     if (!r) return null;
     return [el, l.x * W - (r.left - origin.left), (l.y + l.h / 2) * H - ((r.top + r.bottom) / 2 - origin.top)];
   });
@@ -338,9 +340,10 @@ new MutationObserver(() => { clearTimeout(pending); pending = setTimeout(layout,
 
 // Show a frame in place: the picture as soon as it's loaded, then the text once OCR is done.
 // The page itself never reloads, so a long-lived (live) window keeps Migaku active.
-let showing = 0;
+let showToken = 0;
+let rendered = null;  // the frame whose picture is on screen (reported to the server in live mode)
 async function show(id) {
-  const token = ++showing;
+  const token = ++showToken;
   frame = id;
   if (!live) history.replaceState(null, "", `?frame=${id}`);
   ocr = null;
@@ -350,17 +353,19 @@ async function show(id) {
   $("waiting").hidden = true;
   setStatus("", "loading…");
   updateNav();
-  const pic = new Image();
+  const text = fetch(`/api/frames/${id}/ocr`).then((r) => r.json());  // waits on the server for OCR
+  const pic = new Image();  // just for the picture's size
   pic.src = `frames/${id}/shot.png`;
-  try { await pic.decode(); } catch { if (token === showing) setStatus("", "⚠ picture not found"); return; }
-  if (token !== showing) return;
+  try { await pic.decode(); } catch { if (token === showToken) setStatus("", "⚠ picture not found"); return; }
+  if (token !== showToken) return;
   dims = { w: pic.naturalWidth, h: pic.naturalHeight };
   // The picture is its own page (see picture.html) so Migaku's "hover image + E" works.
-  img.src = `picture.html?frame=${id}`;
+  picture.onload = () => { if (token === showToken) { rendered = id; reportLive(); } };
+  picture.src = `picture.html?frame=${id}`;
   layout();
   setStatus("", "reading text…", true);
-  const data = await (await fetch(`/api/frames/${id}/ocr`)).json();
-  if (token !== showing) return;
+  const data = await text;
+  if (token !== showToken) return;
   ocr = data;
   build();
 }
@@ -380,7 +385,7 @@ function build() {
       const el = block.appendChild(document.createElement("span"));
       el.className = "line";
       el.textContent = ocr.lines[i].text;
-      el.dataset.box = JSON.stringify(ocr.lines[i]);
+      el.box = ocr.lines[i];  // its OCR box, for layout()
     }
     block.dataset.text = idx.map((i) => ocr.lines[i].text).join("");
     transcript.appendChild(document.createElement("p")).textContent = block.dataset.text;
@@ -411,7 +416,7 @@ function postDom() {
   // Alignment check: how far each line's first glyph is from where its OCR box says.
   const o = stage.getBoundingClientRect(), W = o.width, H = o.height;
   const report = [...stage.querySelectorAll(".line")].map((el) => {
-    const l = JSON.parse(el.dataset.box), r = firstGlyphRect(el);
+    const l = el.box, r = firstGlyphRect(el);
     return r && `${l.text}  dx=${(r.left - o.left - l.x * W).toFixed(1)} dy=${((r.top + r.bottom) / 2 - o.top - (l.y + l.h / 2) * H).toFixed(1)}`;
   });
   const sentences = [...stage.querySelectorAll("[data-mgk-sentence]")].map((e) => e.dataset.mgkSentence);
@@ -422,7 +427,6 @@ function postDom() {
 }
 
 addEventListener("resize", layout);
-const $ = (id) => document.getElementById(id);
 const press = (id, on) => $(id).setAttribute("aria-pressed", String(on));
 
 function toggleOcrText() { press("btn-ocr", document.body.classList.toggle("show-text")); }
@@ -487,15 +491,18 @@ if (debug && params.has("translate")) setTimeout(async () => {
 }, 4000);
 // Older/newer frames (the list is newest first); they swap in place too.
 const $prev = document.getElementById("prev"), $next = document.getElementById("next");
-for (const a of [$prev, $next]) a.onclick = (e) => { e.preventDefault(); if (a.dataset.id) show(a.dataset.id); };
+for (const a of [$prev, $next]) a.onclick = (e) => {
+  e.preventDefault();
+  if (a.href) show(new URL(a.href).searchParams.get("frame"));
+};
 function updateNav() {
   const id = frame;
   fetch("/api/frames").then((r) => r.json()).then((frames) => {
     if (id !== frame) return;
     const i = frames.findIndex((f) => f.id === frame);
     for (const [a, f] of [[$prev, frames[i + 1]], [$next, i > 0 && frames[i - 1]]]) {
-      if (i >= 0 && f) { a.href = `/viewer.html?frame=${f.id}`; a.dataset.id = f.id; }
-      else { a.removeAttribute("href"); delete a.dataset.id; }
+      if (i >= 0 && f) a.href = `/viewer.html?frame=${f.id}`;
+      else a.removeAttribute("href");
     }
   }).catch(() => {});
 }
@@ -508,8 +515,8 @@ async function follow() {
   let after = "";
   for (;;) {
     try {
-      const q = new URLSearchParams({ after, focused: hasFocus() ? "1" : "0", frame: frame || "" });
-      const { id } = await (await fetch(`/api/latest?${q}`)).json();
+      // no-store: the browser's cache would queue identical waiting requests behind each other.
+      const { id } = await (await fetch(`/api/latest?after=${after}`, { cache: "no-store" })).json();
       if (id && id !== after) {
         after = id;
         show(id);
@@ -522,17 +529,22 @@ async function follow() {
     }
   }
 }
-// The hotkey script asks the server whether this window has focus: if so the key hides it,
-// otherwise it captures the game.
-const hasFocus = () => document.hasFocus() && !document.hidden;
-function reportFocus() {
-  setTimeout(() => fetch("/api/live", { method: "POST", body: JSON.stringify({ focused: hasFocus(), frame }) }).catch(() => {}));
+// The hotkey script asks the server whether this window has focus (if so the key hides it,
+// otherwise it captures the game) and which frame is on screen (it raises the window once the
+// new one is). Focus is read a tick after the event: a blur that only moved focus into the
+// picture's iframe leaves the window focused.
+function reportLive() {
+  if (!live) return;
+  setTimeout(() => {
+    const focused = document.hasFocus() && !document.hidden;
+    fetch("/api/live", { method: "POST", body: JSON.stringify({ focused, frame: rendered }) }).catch(() => {});
+  });
 }
 if (live) {
   document.body.classList.add("live");
-  document.title = "Migaku Live";
-  for (const ev of ["focus", "blur"]) addEventListener(ev, reportFocus);
-  document.addEventListener("visibilitychange", reportFocus);
+  document.title = "Migaku Live";  // names the window; must match LIVE_TITLE in migaku_games.py
+  for (const ev of ["focus", "blur"]) addEventListener(ev, reportLive);
+  document.addEventListener("visibilitychange", reportLive);
   addEventListener("mousemove", (e) => document.body.classList.toggle("peek", e.clientY > innerHeight - 70 || !$("help").hidden));
   follow();
 } else if (frame) {

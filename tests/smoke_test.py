@@ -26,8 +26,7 @@ def call(method, path, body=None, expect=200):
     except urllib.error.HTTPError as e:
         status, raw = e.code, e.read()
     assert status == expect, f"{method} {path}: HTTP {status}, expected {expect}: {raw[:200]!r}"
-    ctype = "json" if raw[:1] in (b"{", b"[") else "raw"
-    return json.loads(raw) if ctype == "json" else raw
+    return json.loads(raw) if raw[:1] in (b"{", b"[") else raw
 
 
 def wait_for_server():

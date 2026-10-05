@@ -107,7 +107,9 @@ set `STEAM_DIR` in a `.env` file next to `compose.yaml` for other installs (Flat
 
 ```sh
 docker compose up -d --build
-python3 tests/smoke_test.py        # end-to-end checks against the running server
+# End-to-end checks, against a throwaway container so your frames and settings aren't touched:
+docker run --rm -d --name migaku-smoke -p 8799:8765 ghcr.io/chatton/migaku-games:latest
+python3 tests/smoke_test.py http://localhost:8799 && docker stop migaku-smoke
 python3 make_test_image.py         # regenerate the synthetic samples (macOS font)
 ```
 

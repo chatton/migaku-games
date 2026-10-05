@@ -70,20 +70,8 @@
   <div id="empty" hidden>No frames yet. Press your overlay hotkey in a game, or drop a screenshot above.</div>
 </main>
 <div id="toast"></div>
+<script src="/common.js"></script>
 <script>
-const $ = (id) => document.getElementById(id);
-const api = async (path, opts = {}) => {
-  const res = await fetch(path, opts);
-  const body = res.headers.get("content-type")?.includes("json") ? await res.json() : null;
-  if (!res.ok) throw new Error(body?.error || res.statusText);
-  return body;
-};
-const toast = (msg) => {
-  $("toast").textContent = msg;
-  $("toast").classList.add("show");
-  clearTimeout(toast.t);
-  toast.t = setTimeout(() => $("toast").classList.remove("show"), 2500);
-};
 
 function ago(t) {
   const s = Date.now() / 1000 - t;
@@ -174,15 +162,7 @@ $("game").onchange = refresh;
 loadConfig();
 refresh();
 setInterval(refresh, 5000);  // new captures from the hotkey/CLI show up on their own
-// Migaku's toolbar sits over the top of the page; measure it and move the header below it.
-function clearMigakuBar() {
-  const host = document.getElementById("MigakuShadowDom");
-  let y = 0;
-  while (host && y < 160 && document.elementFromPoint(innerWidth / 2, y + 1) === host) y += 2;
-  document.documentElement.style.setProperty("--migaku-bar", y + "px");
-}
-setTimeout(clearMigakuBar, 1500);
-addEventListener("resize", clearMigakuBar);
+followMigakuBar();
 </script>
 </body>
 </html>

@@ -51,6 +51,13 @@ MAX_UPLOAD = 50 * 1024 * 1024
 PRUNE_EVERY = 600  # seconds
 
 
+def write_json(path: Path, obj) -> None:
+    """Write then rename, so a reader never sees half a file."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2))
+    tmp.replace(path)
+
+
 class Store:
     """Frames live in <data>/frames/<id>/{shot.png, ocr.json[, pinned]}."""
 
@@ -65,28 +72,26 @@ class Store:
         self.settings_lock = threading.Lock()
         self.ocr_lock = threading.Lock()  # one OCR process at a time
         self.pending = {}  # frame id -> Event, set when its OCR has finished
+        self.summaries = {}  # frame id -> the parts of its list() entry that come from ocr.json
         # Newest frame, and the live viewer's state; the condition wakes waiting viewers.
         self.cond = threading.Condition()
         self.latest = self.newest()
         self.live = {"seen": 0.0, "waiting": 0, "focused": False, "frame": None}
+        # Only this process writes settings.json, so it's read once and kept in memory.
+        try:
+            self.settings = json.loads(self.settings_path.read_text())
+        except (OSError, ValueError):
+            self.settings = {}
 
     # --- settings -------------------------------------------------------------------
-    def settings(self) -> dict:
-        try:
-            return json.loads(self.settings_path.read_text())
-        except (OSError, ValueError):
-            return {}
-
     def save_settings(self, **changes) -> None:
         with self.settings_lock:
-            settings = {**self.settings(), **changes}
-            tmp = self.settings_path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(settings, ensure_ascii=False, indent=2))
-            tmp.replace(self.settings_path)
+            self.settings = {**self.settings, **changes}
+            write_json(self.settings_path, self.settings)
 
     def retention_hours(self) -> float:
         try:
-            return float(self.settings()["retention_hours"])
+            return float(self.settings["retention_hours"])
         except (KeyError, ValueError, TypeError):
             return self.default_retention
 
@@ -99,10 +104,10 @@ class Store:
     # with its name and takes the experimental freeze settings from it. Ids are stable, so a
     # profile can be renamed.
     def profiles(self) -> dict:
-        return self.settings().get("profiles", {})
+        return self.settings.get("profiles", {})
 
     def active_profile(self):
-        active = self.settings().get("active_profile")
+        active = self.settings.get("active_profile")
         return active if active in self.profiles() else None
 
     def set_profiles(self, profiles) -> None:
@@ -133,9 +138,11 @@ class Store:
             raise KeyError(frame_id)
         return p
 
+    def frame_dirs(self) -> list:
+        return [f for f in self.frames.iterdir() if f.is_dir() and FRAME_ID.match(f.name)]
+
     def newest(self):
-        ids = [f.name for f in self.frames.iterdir() if f.is_dir() and FRAME_ID.match(f.name)]
-        return max(ids, default=None)  # ids sort by time
+        return max((f.name for f in self.frame_dirs()), default=None)  # ids sort by time
 
     def new_frame_dir(self) -> tuple:
         with self.id_lock:  # one id per millisecond
@@ -149,30 +156,33 @@ class Store:
                     time.sleep(0.001)
 
     def add(self, image_bytes: bytes, engine: str, game: str = "", wait: bool = True) -> dict:
-        """Save the picture and OCR it. With wait=False, return as soon as the picture is saved
-        (the live viewer shows it straight away) and OCR in the background."""
+        """Save the picture and OCR it in the background. With wait=False, return straight away
+        (the live viewer shows the picture at once); otherwise wait for the text."""
         frame_id, now = self.new_frame_dir()
         frame = self.frames / frame_id
         try:
             image = Image.open(io.BytesIO(image_bytes))
-            image.convert("RGB").save(frame / "shot.png", "PNG")
+            if image.format == "PNG":
+                (frame / "shot.png").write_bytes(image_bytes)  # as is: re-encoding a 4K PNG is slow
+            else:
+                image.convert("RGB").save(frame / "shot.png", "PNG")
         except Exception:
             shutil.rmtree(frame, ignore_errors=True)
             raise ValueError("upload is not an image") from None
-        done = self.pending[frame_id] = threading.Event()
+        self.pending[frame_id] = threading.Event()
         meta = {"created": now, **({"game": game} if game else {})}
+        threading.Thread(target=self.run_ocr, args=(frame_id, engine, meta), daemon=True).start()
         if not wait:
             self.set_latest(frame_id)
-            threading.Thread(target=self.run_ocr, args=(frame_id, engine, meta), daemon=True).start()
             return {"id": frame_id, "lines": None}
-        data = self.run_ocr(frame_id, engine, meta)
-        if "error" in data:
-            shutil.rmtree(frame, ignore_errors=True)
+        data = self.ocr_result(frame_id)
+        if "error" in data:  # a blocking caller gets the error instead of a frame without text
+            self.delete(frame_id)
             raise pipeline.OcrError(data["error"])
         self.set_latest(frame_id)
         return {"id": frame_id, "lines": [l["text"] for l in data["lines"]]}
 
-    def run_ocr(self, frame_id: str, engine: str, meta: dict) -> dict:
+    def run_ocr(self, frame_id: str, engine: str, meta: dict) -> None:
         frame = self.frames / frame_id
         try:
             with self.ocr_lock:
@@ -180,13 +190,8 @@ class Store:
         except Exception as e:
             data = {"engine": engine, "lines": [], "blocks": [], "error": str(e)}
             print(f"ocr {frame_id}: {e}", file=sys.stderr, flush=True)
-        data.update(meta)
-        # Written then renamed, so a viewer never reads half a file.
-        tmp = frame / "ocr.json.tmp"
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2))
-        tmp.replace(frame / "ocr.json")
+        write_json(frame / "ocr.json", {**data, **meta})
         self.pending.pop(frame_id).set()
-        return data
 
     def ocr_result(self, frame_id: str) -> dict:
         frame = self.path(frame_id)
@@ -219,31 +224,41 @@ class Store:
         is_open = self.live["waiting"] > 0 or time.time() - self.live["seen"] < 5
         return {"open": is_open, "focused": is_open and self.live["focused"], "frame": self.live["frame"]}
 
-    def summary(self, frame: Path) -> dict:
+    # --- listing --------------------------------------------------------------------
+    def ocr_summary(self, frame: Path) -> dict:
+        """The parts of a frame's summary that come from its ocr.json, cached once OCR is done
+        (the file never changes after that)."""
+        cached = self.summaries.get(frame.name)
+        if cached:
+            return cached
         try:
             data = json.loads((frame / "ocr.json").read_text())
         except (OSError, ValueError):
             data = {}
-        created = data.get("created") or frame.stat().st_mtime
-        pinned = (frame / "pinned").exists()
-        hours = self.retention_hours()
         blocks = [" ".join(data["lines"][i]["text"] for i in b) for b in data.get("blocks", [])]
         # Preview: the first block that reads like dialogue, not a name tag.
         preview = next((b for b in blocks if len(b) > 12 or re.search(r"[「。、！？…]", b)), blocks[0] if blocks else "")
-        return {
+        summary = {
             "id": frame.name,
-            "created": created,
+            "created": data.get("created") or frame.stat().st_mtime,
             "engine": data.get("engine", "vision"),
             "game": data.get("game", ""),
             "lines": len(data.get("lines", [])),
             "preview": preview,
-            "pinned": pinned,
-            "expires": None if pinned or hours == 0 else created + hours * 3600,
         }
+        if data and frame.name not in self.pending:
+            self.summaries[frame.name] = summary
+        return summary
 
     def list(self) -> list:
-        frames = [f for f in self.frames.iterdir() if f.is_dir() and FRAME_ID.match(f.name)]
-        return sorted((self.summary(f) for f in frames), key=lambda s: s["created"], reverse=True)
+        hours = self.retention_hours()
+        out = []
+        for frame in self.frame_dirs():
+            s = dict(self.ocr_summary(frame))
+            s["pinned"] = (frame / "pinned").exists()
+            s["expires"] = None if s["pinned"] or hours == 0 else s["created"] + hours * 3600
+            out.append(s)
+        return sorted(out, key=lambda s: s["created"], reverse=True)
 
     def pin(self, frame_id: str, pinned: bool) -> None:
         marker = self.path(frame_id) / "pinned"
@@ -254,19 +269,19 @@ class Store:
 
     def delete(self, frame_id: str) -> None:
         shutil.rmtree(self.path(frame_id))
-        self.latest = self.newest()
+        self.summaries.pop(frame_id, None)
+        self.set_latest(self.newest())
 
     def prune(self) -> int:
-        removed = 0
         now = time.time()
-        for s in self.list():
-            if s["expires"] is not None and s["expires"] < now:
-                shutil.rmtree(self.frames / s["id"], ignore_errors=True)
-                removed += 1
-        if removed:
-            self.latest = self.newest()
-            print(f"retention: removed {removed} frame(s)", flush=True)
-        return removed
+        expired = [s["id"] for s in self.list() if s["expires"] is not None and s["expires"] < now]
+        for frame_id in expired:
+            shutil.rmtree(self.frames / frame_id, ignore_errors=True)
+            self.summaries.pop(frame_id, None)
+        if expired:
+            self.set_latest(self.newest())
+            print(f"retention: removed {len(expired)} frame(s)", flush=True)
+        return len(expired)
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -277,6 +292,7 @@ class Handler(SimpleHTTPRequestHandler):
         body = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")  # API state; also keeps browsers from queueing identical long-polls
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -319,8 +335,6 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/live":
             return self.send_json(self.store.live_state())
         if path == "/api/latest":
-            if "focused" in params:
-                self.store.report_live(params["focused"] == "1", params.get("frame"))
             return self.send_json({"id": self.store.wait_latest(params.get("after", ""))})
         m = re.match(r"^/api/frames/([^/]+)/ocr$", path)
         if m:

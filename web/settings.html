@@ -55,7 +55,6 @@
   .switch input:checked + .track { background: var(--exp); }
   .switch input:checked + .track::after { transform: translateX(14px); background: #fff; }
   .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
-  #empty { padding: 14px; color: var(--muted); }
   #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--panel);
     border: 1px solid var(--line); padding: 8px 14px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
   #toast.show { opacity: 1; }
@@ -102,20 +101,8 @@
   </section>
 </main>
 <div id="toast"></div>
+<script src="/common.js"></script>
 <script>
-const $ = (id) => document.getElementById(id);
-const api = async (path, opts = {}) => {
-  const res = await fetch(path, opts);
-  const body = await res.json();
-  if (!res.ok) throw new Error(body?.error || res.statusText);
-  return body;
-};
-const toast = (msg) => {
-  $("toast").textContent = msg;
-  $("toast").classList.add("show");
-  clearTimeout(toast.t);
-  toast.t = setTimeout(() => $("toast").classList.remove("show"), 2000);
-};
 
 let profiles = {}, active = null;
 
@@ -194,23 +181,16 @@ $("add").onclick = async () => {
   if (!name) return;
   const id = "p" + Date.now().toString(36);
   // A new profile becomes the active one: you're adding it for the game you're about to play.
-  if (await save({ profiles: { ...profiles, [id]: { name, freeze: false, process: "" } } })) {
-    await save({ active_profile: id }, `Added ${name}`);
+  const added = await save({ profiles: { ...profiles, [id]: { name, freeze: false, process: "" } }, active_profile: id },
+    `Added ${name}`);
+  if (added) {
     $("new-name").value = "";
     render();
   }
 };
 $("new-name").onkeydown = (e) => { if (e.key === "Enter") $("add").click(); };
 load();
-// Migaku's toolbar sits over the top of the page; measure it and move the header below it.
-function clearMigakuBar() {
-  const host = document.getElementById("MigakuShadowDom");
-  let y = 0;
-  while (host && y < 160 && document.elementFromPoint(innerWidth / 2, y + 1) === host) y += 2;
-  document.documentElement.style.setProperty("--migaku-bar", y + "px");
-}
-setTimeout(clearMigakuBar, 1500);
-addEventListener("resize", clearMigakuBar);
+followMigakuBar();
 </script>
 </body>
 </html>
