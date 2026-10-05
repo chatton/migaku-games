@@ -16,6 +16,7 @@ ACTIONS = {
     "translate_all": ("t", "translate every dialogue box"),
     "toggle_ocr_text": ("v", "show the OCR text over the picture"),
     "toggle_transcript": ("h", "transcript"),
+    "toggle_colours": ("c", "colour-matched translation words on/off"),
     "caption_larger": ("+", "larger captions"),
     "caption_smaller": ("-", "smaller captions"),
     "previous_frame": ("[", "older frame"),
@@ -51,8 +52,8 @@ def parse(raw) -> tuple:
     """Validate the parsed YAML document and fill in defaults."""
     warnings = []
     raw = {} if raw is None else _expect(raw, dict, "config")
-    _only(raw, ("ocr_engine", "retention_hours", "copy_frame_on_card", "active_profile", "profiles", "keybindings"),
-          "config")
+    _only(raw, ("ocr_engine", "retention_hours", "copy_frame_on_card", "translation_colours", "active_profile",
+                "profiles", "keybindings"), "config")
 
     engine = raw.get("ocr_engine")
     if engine is not None and engine not in ENGINES:
@@ -63,6 +64,7 @@ def parse(raw) -> tuple:
         raise ConfigError(f"retention_hours: expected a number >= 0 (0 keeps frames forever), got {hours!r}")
 
     copy_frame = _expect(raw.get("copy_frame_on_card", True), bool, "copy_frame_on_card")
+    colours = _expect(raw.get("translation_colours", False), bool, "translation_colours")
 
     profiles = {}
     for pid, prof in (_expect(raw.get("profiles") or {}, dict, "profiles")).items():
@@ -104,6 +106,7 @@ def parse(raw) -> tuple:
         "ocr_engine": engine,
         "retention_hours": float(hours),
         "copy_frame_on_card": copy_frame,
+        "translation_colours": colours,
         "active_profile": active,
         "profiles": profiles,
         "keybindings": keys,

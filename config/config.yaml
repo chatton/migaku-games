@@ -14,6 +14,13 @@ retention_hours: 24
 # the picture by itself: Migaku only takes an image from a hovered <img>.)
 copy_frame_on_card: true
 
+# Colour-match translations: words in the English caption and the Japanese words they translate
+# (underlined on the picture) share a colour. Matched locally with the JMdict dictionary, so
+# content words (nouns, verbs, adjectives, adverbs) match; grammar and loose phrasing don't.
+# Off by default, leaving just Migaku's known/unknown underlines; this sets whether it starts on,
+# and the viewer's toggle (palette button, or C) switches it any time.
+translation_colours: false
+
 # Game profiles. The active one tags overlay captures with its name (the gallery filters by
 # it) and holds per-game options. Switch games by changing active_profile and reloading.
 active_profile: ff8
@@ -37,6 +44,7 @@ profiles:
 #   translate_all: t        translate every dialogue box
 #   toggle_ocr_text: v      show the OCR text over the picture
 #   toggle_transcript: h    transcript
+#   toggle_colours: c       colour-matched translation words on/off
 #   caption_larger: "+"     larger captions
 #   caption_smaller: "-"    smaller captions
 #   previous_frame: "["     older frame

@@ -32,13 +32,20 @@
   }
   .tl-btn:hover, .tl-btn.busy { opacity: 1; }
   .tl-caption {
-    position: absolute; font: 20px/1.35 system-ui, sans-serif; cursor: move; touch-action: none; user-select: none; color: #fff; background: rgba(10, 12, 20, .88);
-    border-left: 3px solid #7aa2ff; padding: 6px 10px; border-radius: 4px; white-space: normal;
+    position: absolute; font: 24px/1.35 system-ui, sans-serif; cursor: move; touch-action: none; user-select: none;
+    color: #16181d; background: rgba(255, 255, 255, .96); box-shadow: 0 2px 12px rgba(0, 0, 0, .45);
+    border-left: 4px solid #4c6ef5; padding: 7px 12px; border-radius: 6px; white-space: normal;
   }
   .tl-caption[hidden] { display: none; }
   /* Control text is drawn from data attributes via CSS so it isn't in the DOM, where
      Migaku would parse it as Japanese sentences and rewrite it. */
-  .tl-btn::before, .tl-caption::before { content: attr(data-label); }
+  .tl-btn::before, .tl-caption::before, .tl-caption .w::before { content: attr(data-label); }
+  /* Colour-matched translation: caption words and underlines under the Japanese they translate. */
+  #marks { position: absolute; inset: 0; pointer-events: none; }
+  #marks div { position: absolute; height: 3px; border-radius: 2px; box-shadow: 0 0 2px rgba(0, 0, 0, .8); }
+  .tl-caption .w.m { font-weight: 600; }
+  body.no-colours #marks { display: none; }
+  body.no-colours .tl-caption .w.m { color: inherit !important; font-weight: inherit; }
   #transcript { background: var(--panel); padding: 10px 16px; font-size: 22px; line-height: 1.6; max-height: 30vh; overflow: auto; }
   #transcript p { margin: 0; }
   #transcript[hidden] { display: none !important; }
@@ -115,7 +122,7 @@
 </style>
 </head>
 <body>
-  <div id="stage-wrap"><div id="stage"><iframe id="shot" title="Frame picture"></iframe><div id="overlay"></div></div></div>
+  <div id="stage-wrap"><div id="stage"><iframe id="shot" title="Frame picture"></iframe><div id="overlay"></div><div id="marks"></div></div></div>
   <div id="waiting" hidden data-label=""></div>
   <div id="notice" data-label=""></div>
   <div id="transcript" hidden></div>
@@ -129,6 +136,7 @@
       <button class="tb wide" id="btn-translate" data-action="translate_all"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h8M8 3v2M5.5 5c.8 3 3 5.5 6 7M10.5 5c-.8 3.2-3 6-6.5 8"/><path d="M13 21l4-10 4 10M14.5 17.5h5"/></svg><span data-label="Translate"></span></button>
       <button class="tb" id="btn-ocr" aria-pressed="false" data-action="toggle_ocr_text"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7V5h14v2M12 5v14M9 19h6"/></svg></button>
       <button class="tb" id="btn-transcript" aria-pressed="false" data-action="toggle_transcript"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 10h14M5 14h10M5 18h7"/></svg></button>
+      <button class="tb" id="btn-colours" aria-pressed="false" data-action="toggle_colours"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.6 0-.5-.2-.8-.4-1.1-.3-.3-.4-.6-.4-1 0-.9.7-1.6 1.6-1.6H16a5 5 0 0 0 5-5C21 6.4 17 3 12 3z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="10.5" cy="7.2" r="1.2"/><circle cx="15" cy="7.4" r="1.2"/></svg></button>
       <span class="seg" id="seg-caption" data-tip="Caption size">
         <button class="tb" id="btn-smaller"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12"/></svg></button>
         <span class="seg-label" data-label="Aa"></span>
@@ -219,6 +227,7 @@ function layout() {
   });
   for (const m of moves) if (m) { m[0].style.left = m[1] + "px"; m[0].style.top = m[2] + "px"; }
   for (const block of stage.querySelectorAll(".block")) if (block.tlBtn) placeControls(block, origin, W);
+  drawMarks(origin);
 }
 
 // Translate button at the end of a block's first line; caption below its last line.
@@ -238,7 +247,7 @@ function placeControls(block, origin, W) {
 
   const cap = block.tlCaption;
   const dialogueSize = parseFloat(block.querySelector(".line").style.fontSize) || 20;
-  cap.style.fontSize = Math.max(20, dialogueSize * 0.75) * captionScale + "px";
+  cap.style.fontSize = Math.max(24, dialogueSize * 0.9) * captionScale + "px";
   cap.style.maxWidth = Math.max(W - left - 16, W * 0.5) + "px";
   if (block.tlMoved) {
     // Dragged: keep the position, stored as stage fractions so it survives resizes.
@@ -311,21 +320,109 @@ function translateViaMigaku(text) {
 
 async function toggleTranslation(block) {
   const cap = block.tlCaption;
-  if (!cap.hidden) { cap.hidden = true; return; }
+  if (!cap.hidden) { cap.hidden = true; layout(); return; }
   cap.hidden = false;
   layout();
   if (cap.dataset.done) return;
   block.tlBtn.classList.add("busy");
   cap.dataset.label = "translating…";
   try {
-    cap.dataset.label = await translateViaMigaku(block.dataset.text);
+    const en = await translateViaMigaku(block.dataset.text);
+    cap.dataset.label = en;
     cap.dataset.done = "1";
+    await colourTranslation(block, en);  // computed even when colours are off, so toggling on is instant
     layout();
   } catch (err) {
     cap.dataset.label = "⚠ " + err.message;
+    fetch("/api/log", { method: "POST", body: `translation failed: ${err.stack || err}` }).catch(() => {});
   } finally {
     block.tlBtn.classList.remove("busy");
   }
+}
+
+// --- Colour-matched translations --------------------------------------------------------
+// The server matches Japanese words to the English words that translate them (align.py, local
+// JMdict lookups). Matched words share a colour: in the caption, and as an underline under the
+// Japanese on the picture. Offsets are into the block's text without whitespace.
+const PALETTE = ["#e03131", "#e8590c", "#c99700", "#2f9e44", "#1c7ed6", "#7048e8", "#d6336c", "#0c8599"];
+const compact = (text) => text.replace(/[\s\u200b]/g, "");
+
+async function colourTranslation(block, en) {
+  try {
+    const { pairs } = await api("/api/align", { method: "POST", body: JSON.stringify({ ja: compact(block.dataset.text), en }) });
+    if (!pairs?.length) return;
+    // Not block.align: <div> has a built-in align property that turns anything into a string.
+    block.wordPairs = pairs.map((p, i) => ({ ...p, colour: PALETTE[i % PALETTE.length] }));
+  } catch {
+    return;  // plain caption
+  }
+  // Caption as word spans; text stays in data-label (CSS) so Migaku doesn't parse it.
+  const spans = [];
+  let at = 0;
+  for (const p of [...block.wordPairs].sort((a, b) => a.en[0] - b.en[0])) {
+    if (p.en[0] > at) spans.push([en.slice(at, p.en[0])]);
+    spans.push([en.slice(p.en[0], p.en[1]), p.colour]);
+    at = p.en[1];
+  }
+  if (at < en.length) spans.push([en.slice(at)]);
+  const cap = block.tlCaption;
+  cap.dataset.label = "";
+  cap.replaceChildren(...spans.map(([text, colour]) => {
+    const span = document.createElement("span");
+    span.className = colour ? "w m" : "w";
+    span.dataset.label = text;
+    if (colour) span.style.color = colour;
+    return span;
+  }));
+}
+
+// Each visible character of a block (skipping Migaku's furigana), as [text node, offset].
+function blockChars(block) {
+  const chars = [];
+  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (n.parentElement.closest("rt, rp, .migaku-reading") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  for (let n; (n = walker.nextNode());) {
+    for (let i = 0; i < n.data.length; i++) if (!/[\s\u200b]/.test(n.data[i])) chars.push([n, i]);
+  }
+  return chars;
+}
+
+function drawMarks(origin) {
+  const bars = [];
+  for (const block of stage.querySelectorAll(".block")) {
+    if (!block.wordPairs || block.tlCaption.hidden) continue;
+    const chars = blockChars(block);
+    if (chars.length !== compact(block.dataset.text).length) continue;  // DOM text no longer matches
+    for (const p of block.wordPairs) {
+      // Measure character by character (a range over Migaku's word/ruby elements would include
+      // their boxes, furigana and all), then merge neighbours on the same line into one bar.
+      const runs = [];
+      for (let i = p.ja[0]; i < p.ja[1]; i++) {
+        if (!chars[i]) continue;
+        const range = document.createRange();
+        range.setStart(chars[i][0], chars[i][1]);
+        range.setEnd(chars[i][0], chars[i][1] + 1);
+        const r = range.getBoundingClientRect();
+        if (r.width < 1) continue;
+        const run = runs[runs.length - 1];
+        if (run && Math.abs(r.bottom - run.bottom) < r.height / 2 && r.left - run.right < r.width) {
+          run.right = r.right;
+          run.bottom = Math.max(run.bottom, r.bottom);
+        } else {
+          runs.push({ left: r.left, right: r.right, bottom: r.bottom });
+        }
+      }
+      for (const run of runs) {
+        const bar = document.createElement("div");
+        // A few px under the glyphs, clear of Migaku's own word underlines.
+        Object.assign(bar.style, { left: `${run.left - origin.left}px`, top: `${run.bottom - origin.top + 4}px`,
+          width: `${run.right - run.left}px`, background: p.colour });
+        bars.push(bar);
+      }
+    }
+  }
+  marks.replaceChildren(...bars);
 }
 
 let hoveredBlock = null;
@@ -336,7 +433,12 @@ stage.addEventListener("mouseover", (e) => {
 
 // Migaku rewrites the text (word spans, ruby) after load, which changes glyph positions.
 let pending;
-new MutationObserver(() => { clearTimeout(pending); pending = setTimeout(layout, 50); })
+const marks = document.getElementById("marks");  // drawn by layout(), so its changes don't re-trigger it
+new MutationObserver((records) => {
+  if (records.every((r) => marks.contains(r.target))) return;
+  clearTimeout(pending);
+  pending = setTimeout(layout, 50);
+})
   .observe(stage, { childList: true, subtree: true, characterData: true });
 
 // Show a frame in place: the picture as soon as it's loaded, then the text once OCR is done.
@@ -350,6 +452,7 @@ async function show(id) {
   ocr = null;
   hoveredBlock = null;
   overlay.replaceChildren();
+  marks.replaceChildren();
   $("transcript").replaceChildren();
   $("waiting").hidden = true;
   setStatus("", "loading…");
@@ -430,6 +533,10 @@ function postDom() {
 addEventListener("resize", layout);
 const press = (id, on) => $(id).setAttribute("aria-pressed", String(on));
 
+function setColours(on) {
+  document.body.classList.toggle("no-colours", !on);
+  press("btn-colours", on);
+}
 function toggleOcrText() { press("btn-ocr", document.body.classList.toggle("show-text")); }
 function toggleTranscript() {
   const t = $("transcript");
@@ -445,7 +552,10 @@ function resizeCaptions(bigger) {
 async function translateAll() {
   const blocks = [...stage.querySelectorAll(".block")].filter((b) => b.tlBtn);
   const showing = blocks.length && blocks.every((b) => !b.tlCaption.hidden);
-  if (showing) return blocks.forEach((b) => (b.tlCaption.hidden = true));  // second press hides them
+  if (showing) {  // second press hides them
+    blocks.forEach((b) => (b.tlCaption.hidden = true));
+    return layout();
+  }
   $("btn-translate").classList.add("busy");
   try {
     for (const b of blocks) if (b.tlCaption.hidden) await toggleTranslation(b);
@@ -456,6 +566,7 @@ async function translateAll() {
 
 $("btn-ocr").onclick = toggleOcrText;
 $("btn-transcript").onclick = toggleTranscript;
+$("btn-colours").onclick = () => actions.toggle_colours();
 $("btn-smaller").onclick = () => resizeCaptions(false);
 $("btn-larger").onclick = () => resizeCaptions(true);
 $("btn-translate").onclick = translateAll;
@@ -474,6 +585,7 @@ const actions = {
   translate_all: translateAll,
   toggle_ocr_text: toggleOcrText,
   toggle_transcript: toggleTranscript,
+  toggle_colours: () => setColours(document.body.classList.contains("no-colours")),
   caption_larger: () => resizeCaptions(true),
   caption_smaller: () => resizeCaptions(false),
   previous_frame: () => $prev.click(),
@@ -482,14 +594,20 @@ const actions = {
 };
 let keymap = {};  // key -> action name
 let copyFrameOnCard = false;  // config: copy_frame_on_card
+let coloursConfig = null;  // last seen config translation_colours (the starting state)
 
 async function loadKeybindings() {
   const cfg = await api("/api/config");
   keymap = Object.fromEntries(Object.entries(cfg.keybindings).map(([action, key]) => [key, action]));
   copyFrameOnCard = cfg.copy_frame_on_card;
+  if (cfg.translation_colours !== coloursConfig) {  // first load, or the config changed: apply it
+    coloursConfig = cfg.translation_colours;
+    setColours(coloursConfig);
+  }
   const describe = (action) => cfg.actions[action][0].toUpperCase() + cfg.actions[action].slice(1);
-  for (const el of document.querySelectorAll("[data-action]")) {
-    el.dataset.tip = `${describe(el.dataset.action)}  ${cfg.keybindings[el.dataset.action]}`;
+  // Only the toolbar's own controls (Migaku puts data-action attributes on its page elements too).
+  for (const el of $("bar").querySelectorAll("[data-action]")) {
+    if (cfg.actions[el.dataset.action]) el.dataset.tip = `${describe(el.dataset.action)}  ${cfg.keybindings[el.dataset.action]}`;
   }
   $("seg-caption").dataset.tip = `Caption size  ${cfg.keybindings.caption_smaller} / ${cfg.keybindings.caption_larger}`;
   const rows = Object.entries(cfg.keybindings).map(([action, key]) => [key, cfg.actions[action]]);

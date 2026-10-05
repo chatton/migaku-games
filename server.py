@@ -23,6 +23,7 @@ API
   POST   /api/live                       the live viewer reports {"focused", "frame"}
   PUT    /api/frames/<id>/pin            {"pinned": true|false}
   DELETE /api/frames/<id>
+  POST   /api/align                      {"ja", "en"} -> {"pairs": [{"ja": [s, e], "en": [s, e]}]} matched words
   POST   /api/log                        a line from a page for the server log (e.g. clipboard copies)
   POST   /debug                          viewer posts its DOM here (dev aid)
 """
@@ -263,8 +264,33 @@ class Store:
         return len(expired)
 
 
+class Words:
+    """The word matcher for coloured translations (align.py), loaded on first use: Janome and the
+    JMdict table are only in the container image (MIGAKU_JMDICT)."""
+
+    def __init__(self):
+        self.aligner, self.error, self.lock = None, None, threading.Lock()
+
+    def align(self, ja: str, en: str) -> dict:
+        with self.lock:
+            if self.aligner is None and self.error is None:
+                try:
+                    from align import Aligner
+                    path = Path(os.environ.get("MIGAKU_JMDICT", "/opt/jmdict.sqlite"))
+                    if not path.exists():
+                        raise FileNotFoundError(f"no JMdict table at {path} (tools/build_jmdict.py)")
+                    self.aligner = Aligner(path)
+                except Exception as e:  # ImportError (no Janome) or the missing table
+                    self.error = f"word matching unavailable: {e}"
+                    print(self.error, file=sys.stderr, flush=True)
+            if self.error:
+                return {"pairs": [], "error": self.error}
+            return {"pairs": self.aligner.align(ja, en)}
+
+
 class Handler(SimpleHTTPRequestHandler):
     store: Store
+    words = Words()
 
     # --- helpers --------------------------------------------------------------------
     def send_json(self, obj, status: int = 200) -> None:
@@ -348,6 +374,9 @@ class Handler(SimpleHTTPRequestHandler):
             self.store.report_live(body.get("focused"), body.get("frame"))
             self.send_response(204)
             return self.end_headers()
+        if path == "/api/align":
+            body = json.loads(self.read_body() or b"{}")
+            return self.send_json(self.words.align(str(body.get("ja", ""))[:1000], str(body.get("en", ""))[:2000]))
         if path == "/api/log":
             print(f"page: {self.read_body()[:500].decode(errors='replace')}", flush=True)
             self.send_response(204)

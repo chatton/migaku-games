@@ -12,8 +12,11 @@ RUN pip install -r requirements-meiki.txt
 # Bake the meikiocr models into the image so the container starts fast and works offline.
 RUN python -c "from meikiocr import MeikiOCR; MeikiOCR()" && chmod -R a+rX /opt/hf
 ENV HF_HUB_OFFLINE=1
+# JMdict (CC BY-SA, EDRDG) as a lookup table for coloured translations (align.py).
+COPY tools/build_jmdict.py tools/
+RUN python tools/build_jmdict.py /opt/jmdict.sqlite
 
-COPY pipeline.py server.py config.py ./
+COPY pipeline.py server.py config.py align.py ./
 # The default config; compose mounts ./config over it.
 COPY config/config.yaml /config/config.yaml
 COPY ocr/meiki_ocr.py ocr/
@@ -23,7 +26,8 @@ ENV MIGAKU_OCR=meiki \
     MIGAKU_HOST=0.0.0.0 \
     MIGAKU_PORT=8765 \
     MIGAKU_DATA=/data \
-    MIGAKU_CONFIG=/config/config.yaml
+    MIGAKU_CONFIG=/config/config.yaml \
+    MIGAKU_JMDICT=/opt/jmdict.sqlite
 VOLUME /data
 EXPOSE 8765
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \

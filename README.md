@@ -87,6 +87,12 @@ previous config stays in force. Keybindings that clash with Migaku's own keys ge
 Open viewers pick up new keybindings when they next get focus. Frames and pins are runtime state
 in `./data`, not config.
 
+**Colour-matched translations** (off by default; palette button or `c` in the viewer,
+`translation_colours` to start on): words in the English caption and the Japanese words they
+translate share a colour, underlined on the picture. Matched locally: Janome splits the Japanese
+into words and [JMdict](https://www.edrdg.org/jmdict/j_jmdict.html) (EDRDG, CC BY-SA 4.0) gives
+their meanings, so content words match and grammar doesn't.
+
 **Game profiles:** one per game; switch `active_profile` when you switch games. Overlay captures
 are tagged with the active profile's name (the gallery filters by it).
 

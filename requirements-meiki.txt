@@ -1,3 +1,4 @@
 meikiocr
 pillow
 pyyaml
+janome
