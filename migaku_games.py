@@ -5,6 +5,9 @@
     python3 migaku_games.py --image x.png   # skip capture, use an existing image
     python3 migaku_games.py --app           # open as a chromeless Brave app window
     python3 migaku_games.py --ocr meiki     # ask the server for a specific OCR engine
+    python3 migaku_games.py --overlay       # bind to a hotkey: capture the screen and show it in
+                                            # one long-lived Brave window over the game; the same
+                                            # key hides that window again
 
 Capture, clipboard and the browser are host-side; OCR and storage happen in the frame
 server container (compose.yaml). If nothing is listening at the default address, the
@@ -28,12 +31,13 @@ BROWSER = "Brave Browser"
 MAC = sys.platform == "darwin"
 
 
-def capture(dest: Path, full: bool) -> None:
+def capture(dest: Path, full: bool, screen: bool = False) -> None:
     if MAC:
-        cmd = ["screencapture", "-x"] if full else ["screencapture", "-x", "-i"]
+        cmd = ["screencapture", "-x"] + (["-m"] if screen else [] if full else ["-i"])
     else:
-        # KDE Plasma (Bazzite desktop mode): -b background, -n no notification.
-        cmd = ["spectacle", "-b", "-n", "-f" if full else "-r", "-o"]
+        # KDE Plasma (Bazzite desktop mode): -b background, -n no notification,
+        # -m the screen under the mouse, -f all screens, -r region.
+        cmd = ["spectacle", "-b", "-n", "-m" if screen else "-f" if full else "-r", "-o"]
     subprocess.run(cmd + [str(dest)], check=True)
     if not dest.exists() or not dest.stat().st_size:
         sys.exit("capture cancelled")
@@ -75,8 +79,8 @@ def start_container(server: str) -> None:
     sys.exit("frame server container did not come up; see `docker compose logs`")
 
 
-def upload(server: str, image: Path, engine, game=None) -> dict:
-    query = urllib.parse.urlencode({k: v for k, v in (("ocr", engine), ("game", game)) if v})
+def upload(server: str, image: Path, engine, game=None, wait=True) -> dict:
+    query = urllib.parse.urlencode({k: v for k, v in (("ocr", engine), ("game", game), ("wait", "" if wait else "0")) if v})
     url = server + "/api/frames" + (f"?{query}" if query else "")
     req = urllib.request.Request(url, data=image.read_bytes(), method="POST",
                                  headers={"Content-Type": "application/octet-stream"})
@@ -110,6 +114,104 @@ def open_browser(url: str, app: bool) -> None:
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
 
+# --- overlay mode: one long-lived Brave window ------------------------------------------
+LIVE_TITLE = "Migaku Live"  # the live viewer's page title, which names its window
+
+KWIN_SCRIPT = """
+const wins = workspace.windowList ? workspace.windowList() : workspace.clientList();  // Plasma 6 : 5
+for (const w of wins) {
+  if (!w.caption.includes("%s")) continue;
+  if ("%s" === "show") {
+    w.minimized = false;
+    w.fullScreen = true;
+    if (workspace.windowList) workspace.activeWindow = w; else workspace.activeClient = w;
+  } else {
+    w.minimized = true;
+  }
+}
+"""
+
+
+def kwin(action: str) -> None:
+    """Show or hide the live window via a one-off KWin script (dbus-send ships with Plasma)."""
+    def call(method, *args):
+        return subprocess.run(["dbus-send", "--session", "--print-reply", "--dest=org.kde.KWin", "/Scripting",
+                               f"org.kde.kwin.Scripting.{method}", *args], capture_output=True, text=True)
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+        f.write(KWIN_SCRIPT % (LIVE_TITLE, action))
+    try:
+        call("unloadScript", "string:migaku-live")
+        loaded = call("loadScript", f"string:{f.name}", "string:migaku-live")
+        if loaded.returncode:
+            sys.exit(f"KWin scripting failed: {loaded.stderr.strip()}")
+        call("start")
+        call("unloadScript", "string:migaku-live")
+    finally:
+        Path(f.name).unlink(missing_ok=True)
+
+
+MAC_SCRIPT = """
+ObjC.import("AppKit");
+const brave = Application("%s");
+const w = brave.windows().find((w) => w.name().includes("%s"));
+if (w && "%s" === "show") {
+  const f = $.NSScreen.mainScreen.frame;
+  w.minimized = false;
+  w.bounds = { x: 0, y: 0, width: f.size.width, height: f.size.height };
+  w.index = 1;
+  brave.activate();
+} else if (w) {
+  w.minimized = true;
+}
+"""
+
+
+def mac_window(action: str) -> None:
+    """macOS asks once to let the terminal control Brave (Privacy & Security > Automation)."""
+    r = subprocess.run(["osascript", "-l", "JavaScript", "-e", MAC_SCRIPT % (BROWSER, LIVE_TITLE, action)],
+                       capture_output=True, text=True)
+    if r.returncode:
+        sys.exit(f"couldn't {action} the live window: {r.stderr.strip()}")
+
+
+def live_window(action: str) -> None:
+    (mac_window if MAC else kwin)(action)
+
+
+def live_state(server: str) -> dict:
+    with urllib.request.urlopen(server + "/api/live", timeout=2) as resp:
+        return json.load(resp)
+
+
+def wait_live(server: str, until, timeout: float) -> bool:
+    end = time.time() + timeout
+    while time.time() < end:
+        if until(live_state(server)):
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def overlay(server: str, engine, game) -> None:
+    """The hotkey: hide the live window if it has focus, else capture the screen and show it."""
+    state = live_state(server)
+    if state["focused"]:
+        live_window("hide")
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        shot = Path(tmp) / "shot.png"
+        capture(shot, full=False, screen=True)
+        copy_image_to_clipboard(shot)
+        frame = upload(server, shot, engine, game, wait=False)  # OCR carries on in the background
+    if not state["open"]:
+        open_browser(server + "/viewer.html?live", app=True)
+        if not wait_live(server, lambda s: s["open"], 15):
+            sys.exit("the live window didn't open; is Brave running?")
+    # Raise it once it shows the new picture, so the old one never flashes up.
+    wait_live(server, lambda s: s["frame"] == frame["id"], 2)
+    live_window("show")
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--image", type=Path, help="use this image instead of taking a screenshot")
@@ -119,6 +221,8 @@ def main() -> None:
     p.add_argument("--game", help="tag the frame with this game name")
     p.add_argument("--server", default=DEFAULT_SERVER, help=f"frame server (default {DEFAULT_SERVER})")
     p.add_argument("--no-open", action="store_true", help="don't open the viewer")
+    p.add_argument("--overlay", action="store_true",
+                   help="capture the screen into the long-lived live window, or hide it if it has focus")
     args = p.parse_args()
     server = args.server.rstrip("/")
 
@@ -126,6 +230,8 @@ def main() -> None:
         if server != DEFAULT_SERVER:
             sys.exit(f"no frame server at {server}")
         start_container(server)
+    if args.overlay:
+        return overlay(server, args.ocr, args.game)
 
     with tempfile.TemporaryDirectory() as tmp:
         shot = Path(tmp) / "shot.png"

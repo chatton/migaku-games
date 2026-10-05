@@ -92,6 +92,16 @@
   #help dt { white-space: nowrap; }
   #help dd { margin: 0; }
   #help p { margin: 12px 0 0; color: var(--muted); font-size: 12px; }
+  /* Live mode (?live): one long-lived window over the game. The picture fills the window so it
+     lines up with the game underneath; the toolbar slides up when the mouse nears the bottom. */
+  body.live #bar { position: fixed; left: 0; right: 0; bottom: 0; transform: translateY(100%); transition: transform .15s; z-index: 4; }
+  body.live.peek #bar { transform: none; }
+  body.live #transcript { position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; }
+  #waiting { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted);
+    font: 15px system-ui, sans-serif; pointer-events: none; }
+  #waiting[hidden] { display: none; }
+  #waiting::before { content: attr(data-label); }
+  #status i { font-style: normal; color: #9db8ff; }
   kbd {
     display: inline-block; min-width: 20px; padding: 1px 5px; border: 1px solid #343a46; border-bottom-width: 2px;
     border-radius: 5px; background: #1a1e27; color: #e8e9ec; font: 600 11px/1.4 system-ui, sans-serif; text-align: center;
@@ -100,6 +110,7 @@
 </head>
 <body>
   <div id="stage-wrap"><div id="stage"><iframe id="shot" title="Frame picture"></iframe><div id="overlay"></div></div></div>
+  <div id="waiting" hidden data-label=""></div>
   <div id="transcript" hidden></div>
   <div id="bar">
     <div class="group">
@@ -148,7 +159,9 @@ const reportError = (msg) => fetch("/debug", { method: "POST", body: "ERROR " + 
 addEventListener("error", (e) => reportError(`${e.message} @${e.lineno}:${e.colno}`));
 addEventListener("unhandledrejection", (e) => reportError(String(e.reason && e.reason.stack || e.reason)));
 const params = new URLSearchParams(location.search);
-const frame = params.get("frame");
+const live = params.has("live");
+let frame = params.get("frame");
+let dims = null;  // picture size, known before OCR finishes
 const stage = document.getElementById("stage");
 const overlay = document.getElementById("overlay");
 const img = document.getElementById("shot");
@@ -170,9 +183,9 @@ function firstGlyphRect(el) {
 }
 
 function layout() {
-  if (!ocr) return;
+  if (!dims) return;
   const wrap = document.getElementById("stage-wrap").getBoundingClientRect();
-  const aspect = ocr.width / ocr.height;
+  const aspect = dims.w / dims.h;
   const W = Math.min(wrap.width, wrap.height * aspect), H = W / aspect;
   stage.style.width = W + "px";
   stage.style.height = H + "px";
@@ -317,12 +330,43 @@ let pending;
 new MutationObserver(() => { clearTimeout(pending); pending = setTimeout(layout, 50); })
   .observe(stage, { childList: true, subtree: true, characterData: true });
 
-async function load() {
-  ocr = await (await fetch(`frames/${frame}/ocr.json`)).json();
+// Show a frame in place: the picture as soon as it's loaded, then the text once OCR is done.
+// The page itself never reloads, so a long-lived (live) window keeps Migaku active.
+let showing = 0;
+async function show(id) {
+  const token = ++showing;
+  frame = id;
+  if (!live) history.replaceState(null, "", `?frame=${id}`);
+  ocr = null;
+  hoveredBlock = null;
+  overlay.replaceChildren();
+  $("transcript").replaceChildren();
+  $("waiting").hidden = true;
+  setStatus("", "loading…");
+  updateNav();
+  const pic = new Image();
+  pic.src = `frames/${id}/shot.png`;
+  try { await pic.decode(); } catch { if (token === showing) setStatus("", "⚠ picture not found"); return; }
+  if (token !== showing) return;
+  dims = { w: pic.naturalWidth, h: pic.naturalHeight };
   // The picture is its own page (see picture.html) so Migaku's "hover image + E" works.
-  img.onload = layout;
-  img.src = `picture.html?frame=${frame}`;
-  const transcript = document.getElementById("transcript");
+  img.src = `picture.html?frame=${id}`;
+  layout();
+  setStatus("", "reading text…", true);
+  const data = await (await fetch(`/api/frames/${id}/ocr`)).json();
+  if (token !== showing) return;
+  ocr = data;
+  build();
+}
+
+function setStatus(when, info, busy) {
+  $("status").innerHTML = busy ? "<b></b> · <i></i>" : "<b></b> · <span></span>";
+  $("status").querySelector("b").dataset.label = when;
+  $("status").lastElementChild.dataset.label = info;
+}
+
+function build() {
+  const transcript = $("transcript");
   for (const idx of ocr.blocks) {
     const block = overlay.appendChild(document.createElement("div"));
     block.className = "block";
@@ -350,10 +394,8 @@ async function load() {
     makeDraggable(block);
   }
   const when = ocr.created ? new Date(ocr.created * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : frame;
-  document.getElementById("status").innerHTML = `<b></b> · <span></span>`;
-  document.querySelector("#status b").dataset.label = when;
-  document.querySelector("#status span").dataset.label =
-    `${ocr.engine || "vision"} · ${ocr.blocks.filter((b) => b.length).length} boxes · ${ocr.lines.length} lines`;
+  setStatus([ocr.game, when].filter(Boolean).join(" · "), ocr.error ? `⚠ OCR failed: ${ocr.error}` :
+    `${ocr.engine || "vision"} · ${ocr.blocks.filter((b) => b.length).length} boxes · ${ocr.lines.length} lines`);
   layout();
   // Once Migaku has had time to rewrite the page, post the overlay DOM back for debugging.
   setTimeout(postDom, 4000);
@@ -416,8 +458,8 @@ addEventListener("keydown", (e) => {
   if (e.altKey || e.metaKey || e.ctrlKey) return;
   if (e.key === "v") toggleOcrText();
   if (e.key === "h") toggleTranscript();
-  if (e.key === "[" && $prev.href) location.href = $prev.href;
-  if (e.key === "]" && $next.href) location.href = $next.href;
+  if (e.key === "[") $prev.click();
+  if (e.key === "]") $next.click();
   if (e.key === "y") {
     const target = hoveredBlock?.tlBtn ? hoveredBlock : [...stage.querySelectorAll(".block")].find((b) => b.tlBtn);
     if (target) toggleTranslation(target);
@@ -437,16 +479,59 @@ if (params.has("translate")) setTimeout(async () => {
   });
   fetch("/debug", { method: "POST", body: "TRANSLATIONS\n" + out.join("\n") });
 }, 4000);
-// Older/newer links from the frame list (newest first).
+// Older/newer frames (the list is newest first); they swap in place too.
 const $prev = document.getElementById("prev"), $next = document.getElementById("next");
-fetch("/api/frames").then((r) => r.json()).then((frames) => {
-  const i = frames.findIndex((f) => f.id === frame);
-  if (i < 0) return;
-  if (frames[i + 1]) $prev.href = `/viewer.html?frame=${frames[i + 1].id}`;
-  if (frames[i - 1]) $next.href = `/viewer.html?frame=${frames[i - 1].id}`;
-}).catch(() => {});
+for (const a of [$prev, $next]) a.onclick = (e) => { e.preventDefault(); if (a.dataset.id) show(a.dataset.id); };
+function updateNav() {
+  const id = frame;
+  fetch("/api/frames").then((r) => r.json()).then((frames) => {
+    if (id !== frame) return;
+    const i = frames.findIndex((f) => f.id === frame);
+    for (const [a, f] of [[$prev, frames[i + 1]], [$next, i > 0 && frames[i - 1]]]) {
+      if (i >= 0 && f) { a.href = `/viewer.html?frame=${f.id}`; a.dataset.id = f.id; }
+      else { a.removeAttribute("href"); delete a.dataset.id; }
+    }
+  }).catch(() => {});
+}
 if (params.has("show")) toggleOcrText();
-load();
+
+// Live mode: wait on the server for each new capture and show it. A waiting fetch isn't
+// subject to the timer throttling Brave applies to minimised windows, so a capture shows up
+// straight away even after the window has been hidden for a long time.
+async function follow() {
+  let after = "";
+  for (;;) {
+    try {
+      const q = new URLSearchParams({ after, focused: hasFocus() ? "1" : "0", frame: frame || "" });
+      const { id } = await (await fetch(`/api/latest?${q}`)).json();
+      if (id && id !== after) {
+        after = id;
+        show(id);
+      } else if (!id) {
+        $("waiting").dataset.label = "Waiting for a capture… (run migaku_games.py --overlay)";
+        $("waiting").hidden = false;
+      }
+    } catch {
+      await sleep(2000);  // server restarting
+    }
+  }
+}
+// The hotkey script asks the server whether this window has focus: if so the key hides it,
+// otherwise it captures the game.
+const hasFocus = () => document.hasFocus() && !document.hidden;
+function reportFocus() {
+  setTimeout(() => fetch("/api/live", { method: "POST", body: JSON.stringify({ focused: hasFocus(), frame }) }).catch(() => {}));
+}
+if (live) {
+  document.body.classList.add("live");
+  document.title = "Migaku Live";
+  for (const ev of ["focus", "blur"]) addEventListener(ev, reportFocus);
+  document.addEventListener("visibilitychange", reportFocus);
+  addEventListener("mousemove", (e) => document.body.classList.toggle("peek", e.clientY > innerHeight - 70 || !$("help").hidden));
+  follow();
+} else if (frame) {
+  show(frame);
+}
 </script>
 </body>
 </html>

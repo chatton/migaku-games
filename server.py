@@ -13,7 +13,13 @@ API
   GET    /api/config                     engine, engines, retention_hours
   PUT    /api/config                     {"retention_hours": N}
   GET    /api/frames                     newest first
-  POST   /api/frames[?ocr=ENGINE&game=NAME]  body: image bytes -> {"id", "url"}
+  POST   /api/frames[?ocr=ENGINE&game=NAME&wait=0]
+                                         body: image bytes -> {"id", "url", "lines"}; with wait=0
+                                         it returns once the picture is saved and OCR runs on
+  GET    /api/frames/<id>/ocr            the frame's OCR result, waiting for it if still running
+  GET    /api/latest?after=ID            newest frame id; waits (up to 25s) for one newer than ID
+  GET    /api/live                       the live viewer: {"open", "focused", "frame"}
+  POST   /api/live                       the live viewer reports {"focused", "frame"}
   PUT    /api/frames/<id>/pin            {"pinned": true|false}
   DELETE /api/frames/<id>
   POST   /debug                          viewer posts its DOM here (dev aid)
@@ -53,7 +59,13 @@ class Store:
         self.settings_path = data / "settings.json"
         self.engine = engine
         self.default_retention = retention_hours
-        self.lock = threading.Lock()
+        self.id_lock = threading.Lock()
+        self.ocr_lock = threading.Lock()  # one OCR process at a time
+        self.pending = {}  # frame id -> Event, set when its OCR has finished
+        # Newest frame, and the live viewer's state; the condition wakes waiting viewers.
+        self.cond = threading.Condition()
+        self.latest = self.newest()
+        self.live = {"seen": 0.0, "waiting": 0, "focused": False, "frame": None}
 
     # --- settings -------------------------------------------------------------------
     def retention_hours(self) -> float:
@@ -76,28 +88,91 @@ class Store:
             raise KeyError(frame_id)
         return p
 
-    def add(self, image_bytes: bytes, engine: str, game: str = "") -> dict:
-        with self.lock:  # one id per millisecond, and one OCR process at a time
-            now = time.time()
-            frame_id = time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + f"-{int(now * 1000) % 1000:03d}"
-            frame = self.frames / frame_id
-            frame.mkdir()
-            try:
-                shot = frame / "shot.png"
+    def newest(self):
+        ids = [f.name for f in self.frames.iterdir() if f.is_dir() and FRAME_ID.match(f.name)]
+        return max(ids, default=None)  # ids sort by time
+
+    def new_frame_dir(self) -> tuple:
+        with self.id_lock:  # one id per millisecond
+            while True:
+                now = time.time()
+                frame_id = time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + f"-{int(now * 1000) % 1000:03d}"
                 try:
-                    image = Image.open(io.BytesIO(image_bytes))
-                except Exception:
-                    raise ValueError("upload is not an image") from None
-                image.convert("RGB").save(shot, "PNG")
-                data = pipeline.ocr(shot, engine)
-            except Exception:
-                shutil.rmtree(frame, ignore_errors=True)
-                raise
-            data["created"] = now
-            if game:
-                data["game"] = game
-            (frame / "ocr.json").write_text(json.dumps(data, ensure_ascii=False, indent=2))
+                    (self.frames / frame_id).mkdir()
+                    return frame_id, now
+                except FileExistsError:
+                    time.sleep(0.001)
+
+    def add(self, image_bytes: bytes, engine: str, game: str = "", wait: bool = True) -> dict:
+        """Save the picture and OCR it. With wait=False, return as soon as the picture is saved
+        (the live viewer shows it straight away) and OCR in the background."""
+        frame_id, now = self.new_frame_dir()
+        frame = self.frames / frame_id
+        try:
+            image = Image.open(io.BytesIO(image_bytes))
+            image.convert("RGB").save(frame / "shot.png", "PNG")
+        except Exception:
+            shutil.rmtree(frame, ignore_errors=True)
+            raise ValueError("upload is not an image") from None
+        done = self.pending[frame_id] = threading.Event()
+        meta = {"created": now, **({"game": game} if game else {})}
+        if not wait:
+            self.set_latest(frame_id)
+            threading.Thread(target=self.run_ocr, args=(frame_id, engine, meta), daemon=True).start()
+            return {"id": frame_id, "lines": None}
+        data = self.run_ocr(frame_id, engine, meta)
+        if "error" in data:
+            shutil.rmtree(frame, ignore_errors=True)
+            raise pipeline.OcrError(data["error"])
+        self.set_latest(frame_id)
         return {"id": frame_id, "lines": [l["text"] for l in data["lines"]]}
+
+    def run_ocr(self, frame_id: str, engine: str, meta: dict) -> dict:
+        frame = self.frames / frame_id
+        try:
+            with self.ocr_lock:
+                data = pipeline.ocr(frame / "shot.png", engine)
+        except Exception as e:
+            data = {"engine": engine, "lines": [], "blocks": [], "error": str(e)}
+            print(f"ocr {frame_id}: {e}", file=sys.stderr, flush=True)
+        data.update(meta)
+        # Written then renamed, so a viewer never reads half a file.
+        tmp = frame / "ocr.json.tmp"
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+        tmp.replace(frame / "ocr.json")
+        self.pending.pop(frame_id).set()
+        return data
+
+    def ocr_result(self, frame_id: str) -> dict:
+        frame = self.path(frame_id)
+        done = self.pending.get(frame_id)
+        if done:
+            done.wait(120)
+        return json.loads((frame / "ocr.json").read_text())
+
+    # --- live viewer ----------------------------------------------------------------
+    def set_latest(self, frame_id) -> None:
+        with self.cond:
+            self.latest = frame_id
+            self.cond.notify_all()
+
+    def report_live(self, focused, frame) -> None:
+        self.live.update(seen=time.time(), focused=bool(focused), frame=frame or None)
+
+    def wait_latest(self, after: str, timeout: float = 25):
+        with self.cond:
+            self.live["waiting"] += 1
+            try:
+                self.cond.wait_for(lambda: (self.latest or "") != after, timeout)
+            finally:
+                self.live["waiting"] -= 1
+                self.live["seen"] = time.time()
+            return self.latest
+
+    def live_state(self) -> dict:
+        # Open while it has a request waiting here, or reported in the last few seconds.
+        is_open = self.live["waiting"] > 0 or time.time() - self.live["seen"] < 5
+        return {"open": is_open, "focused": is_open and self.live["focused"], "frame": self.live["frame"]}
 
     def summary(self, frame: Path) -> dict:
         try:
@@ -134,6 +209,7 @@ class Store:
 
     def delete(self, frame_id: str) -> None:
         shutil.rmtree(self.path(frame_id))
+        self.latest = self.newest()
 
     def prune(self) -> int:
         removed = 0
@@ -143,6 +219,7 @@ class Store:
                 shutil.rmtree(self.frames / s["id"], ignore_errors=True)
                 removed += 1
         if removed:
+            self.latest = self.newest()
             print(f"retention: removed {removed} frame(s)", flush=True)
         return removed
 
@@ -184,12 +261,24 @@ class Handler(SimpleHTTPRequestHandler):
 
     # --- routes ---------------------------------------------------------------------
     def do_GET(self) -> None:
-        path, _ = self.route()
+        path, params = self.route()
         if path == "/api/config":
             return self.send_json({"engine": self.store.engine, "engines": list(pipeline.AVAILABLE),
                                    "retention_hours": self.store.retention_hours()})
         if path == "/api/frames":
             return self.send_json(self.store.list())
+        if path == "/api/live":
+            return self.send_json(self.store.live_state())
+        if path == "/api/latest":
+            if "focused" in params:
+                self.store.report_live(params["focused"] == "1", params.get("frame"))
+            return self.send_json({"id": self.store.wait_latest(params.get("after", ""))})
+        m = re.match(r"^/api/frames/([^/]+)/ocr$", path)
+        if m:
+            try:
+                return self.send_json(self.store.ocr_result(m.group(1)))
+            except (KeyError, OSError):
+                return self.send_json({"error": "frame not found"}, 404)
         if path.startswith("/frames/"):
             # Frame files come from the data dir, not web/.
             parts = path.split("/")
@@ -205,9 +294,15 @@ class Handler(SimpleHTTPRequestHandler):
         path, params = self.route()
         if path == "/api/frames":
             engine = params.get("ocr") or self.store.engine
-            result = self.store.add(self.read_body(), engine, params.get("game", "")[:100])
+            result = self.store.add(self.read_body(), engine, params.get("game", "")[:100],
+                                    wait=params.get("wait") != "0")
             result["url"] = f"/viewer.html?frame={result['id']}"
             return self.send_json(result, 201)
+        if path == "/api/live":
+            body = json.loads(self.read_body() or b"{}")
+            self.store.report_live(body.get("focused"), body.get("frame"))
+            self.send_response(204)
+            return self.end_headers()
         if path == "/debug":
             debug = self.store.data / "debug"
             debug.mkdir(exist_ok=True)

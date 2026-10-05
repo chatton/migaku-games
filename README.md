@@ -20,6 +20,24 @@ python3 migaku_games.py --app            # chromeless Brave window
 python3 make_test_image.py               # synthetic samples into samples/
 ```
 
+## Overlay (the main way to play)
+
+Bind `python3 ~/migaku-games/migaku_games.py --overlay` to a global shortcut (KDE: System
+Settings → Shortcuts → Add New → Command or Script; e.g. `Meta+J`). Then, in the game:
+
+1. Press the key: the screen under the mouse is captured and shown fullscreen in a single
+   long-lived Brave window ("Migaku Live"), lined up with the game. The picture is there at
+   once; the hoverable text follows when OCR finishes (about a second).
+2. Hover words, `y` to translate, `E` for cards.
+3. Press the key again: the window minimises and you're back in the game.
+
+The first press opens the window (`/viewer.html?live`); authorise Migaku on it once and leave it
+open. It swaps frames in place, so Migaku stays active. Works for any game: Steam, GOG, emulators.
+Run games borderless windowed so the overlay can cover them.
+
+The window is raised and hidden with a one-off KWin script over `dbus-send` (KDE Plasma), or
+AppleScript on macOS, which asks once to let the terminal control Brave.
+
 ## Steam screenshots
 
 `docker compose up -d` also starts `steam-watcher`, which OCRs every new Steam screenshot (F12,
