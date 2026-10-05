@@ -12,7 +12,7 @@ Two parts:
   container with `docker compose up -d` if it isn't running.
 
 ```sh
-docker compose up -d                     # build + start the server (podman compose works too)
+docker compose up -d                     # server + Steam screenshot watcher (podman compose works too)
 python3 migaku_games.py                  # drag-select a screen region
 python3 migaku_games.py --full           # whole screen
 python3 migaku_games.py --image x.png    # use an existing image
@@ -20,20 +20,26 @@ python3 migaku_games.py --app            # chromeless Brave window
 python3 make_test_image.py               # synthetic samples into samples/
 ```
 
-## Steam screenshots (Bazzite Game Mode)
+## Steam screenshots
 
-Desktop capture tools can't see games in Game Mode, but Steam's own screenshot (F12, or a
-controller button mapped in Steam Input) works everywhere. `steam_watcher.py` watches Steam's
-screenshot folders and uploads each new shot, tagged with the game's name:
+`docker compose up -d` also starts `steam-watcher`, which OCRs every new Steam screenshot (F12,
+or a controller button mapped in Steam Input) and tags the frame with the game's name. Open
+http://localhost:8765 to see them. Screenshots already there at start are skipped.
+
+It reads Steam from `~/.local/share/Steam` (native Steam, as on Bazzite). Elsewhere, set
+`STEAM_DIR` in a `.env` file next to `compose.yaml`:
 
 ```sh
-python3 steam_watcher.py                 # watch all Steam accounts' screenshots
-python3 steam_watcher.py --open          # and open each new frame in Brave
-python3 steam_watcher.py --dir ~/shots --game "FF8"   # any folder, any screenshot tool
+STEAM_DIR=$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam   # Flatpak Steam
+STEAM_DIR=$HOME/Library/Application Support/Steam                      # macOS
 ```
 
-Screenshots already there at start are skipped. To run it at login, see
-`contrib/migaku-steam-watcher.service`. The gallery can filter frames by game.
+Games installed in another Steam library show as `app <id>`, since only `STEAM_DIR` is mounted.
+`steam_watcher.py` also runs on the host (`--open` opens each frame in Brave, `--dir` watches any
+folder); don't run it alongside the container's or every screenshot is uploaded twice.
+
+With rootless podman, `systemctl --user enable podman-restart` brings the containers back after
+a reboot.
 
 ## Web UI
 

@@ -3,6 +3,7 @@
     python3 steam_watcher.py                # watch every Steam account's screenshot folders
     python3 steam_watcher.py --open         # also open each new frame in Brave
     python3 steam_watcher.py --dir ~/shots  # watch a plain folder instead (any screenshot tool)
+    python3 steam_watcher.py --steam /steam --server http://migaku-games:8765   # in compose
 
 Steam's screenshot key (F12, or a controller button mapped in Steam Input) works in Bazzite's
 Game Mode, where desktop capture tools can't see the game. Steam saves each shot to
@@ -30,10 +31,10 @@ IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 POLL = 1.0  # seconds
 
 
-def steam_roots() -> list:
+def steam_roots(candidates: list) -> list:
     """Existing Steam installs, deduplicated (~/.steam/steam is usually a symlink)."""
     seen, roots = set(), []
-    for r in STEAM_ROOTS:
+    for r in candidates:
         if (r / "userdata").is_dir() and r.resolve() not in seen:
             seen.add(r.resolve())
             roots.append(r)
@@ -79,6 +80,17 @@ def scan(roots: list, dirs: list) -> dict:
     return found
 
 
+def wait_for_server(server: str) -> None:
+    """In compose the server may still be starting; keep trying instead of exiting."""
+    for attempt in range(120):
+        if server_up(server):
+            return
+        if attempt == 0:
+            print(f"waiting for the frame server at {server} ...", flush=True)
+        time.sleep(1)
+    sys.exit(f"no frame server at {server}")
+
+
 def settled(path: Path, sizes: dict) -> bool:
     """True once the file's size has stopped changing between polls (Steam writes in chunks)."""
     try:
@@ -94,6 +106,8 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--dir", type=Path, action="append", default=[],
                    help="watch this folder instead of Steam's (repeatable)")
+    p.add_argument("--steam", type=Path, action="append", default=[],
+                   help="Steam install folder (repeatable; default: the usual native/Flatpak/macOS paths)")
     p.add_argument("--game", help="game tag for frames from --dir folders")
     p.add_argument("--open", action="store_true", help="open each new frame in Brave")
     p.add_argument("--app", action="store_true", help="with --open: chromeless Brave app window")
@@ -106,14 +120,17 @@ def main() -> None:
     for d in dirs:
         if not d.is_dir():
             sys.exit(f"not a folder: {d}")
-    roots = [] if dirs else steam_roots()
+    candidates = args.steam or STEAM_ROOTS
+    roots = [] if dirs else steam_roots(candidates)
     if not dirs and not roots:
-        sys.exit("no Steam install found (looked in " + ", ".join(str(r) for r in STEAM_ROOTS) + "); use --dir")
+        sys.exit("no Steam install found (looked in " + ", ".join(str(r) for r in candidates) + "); use --steam or --dir")
 
-    if not server_up(server):
-        if server != DEFAULT_SERVER:
-            sys.exit(f"no frame server at {server}")
+    if server_up(server):
+        pass
+    elif server == DEFAULT_SERVER:
         start_container(server)
+    else:
+        wait_for_server(server)
 
     names = game_names(roots)
     seen = set(scan(roots, dirs))

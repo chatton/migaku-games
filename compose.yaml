@@ -1,4 +1,5 @@
 # docker compose up -d   (or: podman compose up -d, e.g. on Bazzite)
+# Then open http://localhost:8765 and take screenshots with Steam (F12).
 services:
   migaku-games:
     build: .
@@ -10,4 +11,19 @@ services:
       - ./web:/app/web:ro   # live UI edits without a rebuild
     environment:
       MIGAKU_RETENTION_HOURS: "24"   # default; the web UI can change it (saved in data/settings.json)
+    security_opt:
+      - label=disable   # SELinux (Bazzite/Fedora): allow the bind mounts without relabelling them
+    restart: unless-stopped
+
+  # OCRs every new Steam screenshot. Set STEAM_DIR if Steam isn't at ~/.local/share/Steam
+  # (Flatpak: ~/.var/app/com.valvesoftware.Steam/.local/share/Steam,
+  #  macOS: "$HOME/Library/Application Support/Steam").
+  steam-watcher:
+    image: migaku-games
+    depends_on: [migaku-games]
+    command: ["python", "steam_watcher.py", "--steam", "/steam", "--server", "http://migaku-games:8765"]
+    volumes:
+      - ${STEAM_DIR:-${HOME}/.local/share/Steam}:/steam:ro
+    security_opt:
+      - label=disable
     restart: unless-stopped
