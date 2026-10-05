@@ -127,9 +127,13 @@ python3 make_test_image.py         # regenerate the synthetic samples (macOS fon
 
 `viewer.html?debug` posts script errors and the overlay/Migaku DOM to `data/debug/dom.html`.
 
-CI (`.github/workflows/docker.yml`) builds the image and runs the config and smoke tests on every push and
-pull request, then publishes `ghcr.io/chatton/migaku-games` for linux/amd64 and linux/arm64 from
-`main` (`latest`, `sha-…`) and `v*` tags (`1.2.3`, `1.2`).
+CI (`.github/workflows/docker.yml`) builds the image and runs the config and smoke tests on every
+push and pull request. Pushing a version tag also publishes `ghcr.io/chatton/migaku-games` for
+linux/amd64 and linux/arm64 (`latest`, `1.2.3`, `1.2`):
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
 
 `samples/` holds screenshots of commercial games for OCR testing (Famitsu press shots of FF7/8/9 and
 Persona 5 Royal; `ff8r_*` are 1080p Steam store shots of FF8 Remastered in Japanese); keep the repo private.

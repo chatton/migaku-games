@@ -46,9 +46,10 @@ jobs:
         if: always()
         run: docker logs migaku || true
 
+  # Images are published only for version tags (git tag v1.2.3 && git push --tags).
   publish:
     needs: test
-    if: github.event_name != 'pull_request'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -67,8 +68,7 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,prefix=sha-
+            type=raw,value=latest
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
       - name: Build and push (amd64 + arm64)
