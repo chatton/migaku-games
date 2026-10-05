@@ -5,21 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Migaku Frame</title>
 <style>
-  :root { --bg: #000; --fg: #eee; --panel: #15171c; --muted: #8a8f99; --hl: rgba(255, 230, 0, .35); }
+  :root { --bg: #000; --fg: #eee; --panel: #15171c; --muted: #8a8f99; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: "Hiragino Sans", sans-serif; }
   body { display: flex; flex-direction: column; }
   #stage-wrap { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; min-height: 0; }
   #stage { position: relative; }
-  #stage img { display: block; width: 100%; height: 100%; user-select: none; }
+  #shot { display: block; width: 100%; height: 100%; border: 0; }
+  /* Overlay layer above the picture. It ignores the mouse except on the text and controls, so
+     hovering anywhere else hits the <img> itself (Migaku's "hover image + E" needs that), and
+     the picture sits outside the subtree Migaku parses as text. */
+  #overlay { position: absolute; inset: 0; pointer-events: none; }
+  #overlay .line, #overlay .tl-btn, #overlay .tl-caption { pointer-events: auto; }
   /* One element per dialogue block so Migaku takes whole sentences across lines. Migaku
      splits sentences at hard breaks (<br>, block-level or absolutely positioned children)
      but not at relatively positioned inline spans, so all of a block's lines sit on one
      line of text and each is shifted onto its OCR box with position: relative. */
   .block { position: absolute; left: 0; top: 0; white-space: nowrap; line-height: 1; color: transparent; cursor: text; }
   .block .line { position: relative; }
-  .block .line:hover { background: var(--hl); }
-  body.show-text .block .line { color: #fff; background: rgba(0, 0, 0, .55); }
+  /* No box backgrounds on lines: their box includes Migaku's furigana space above the glyphs. */
+  body.show-text .block .line { color: #fff; text-shadow: 0 0 2px #000, 0 0 4px #000, 0 0 6px #000; }
   /* Translate controls live outside .block so Migaku never parses them as dialogue. */
   .tl-btn {
     position: absolute; font: 600 11px system-ui, sans-serif; padding: 2px 6px; border-radius: 4px;
@@ -94,7 +99,7 @@
 </style>
 </head>
 <body>
-  <div id="stage-wrap"><div id="stage"><img id="shot" alt=""></div></div>
+  <div id="stage-wrap"><div id="stage"><iframe id="shot" title="Frame picture"></iframe><div id="overlay"></div></div></div>
   <div id="transcript" hidden></div>
   <div id="bar">
     <div class="group">
@@ -127,12 +132,14 @@
       </dl>
       <h3>Migaku</h3>
       <dl>
-        <dt><kbd>E</kbd></dt><dd>hovering the picture: send it to the card creator</dd>
-        <dt><kbd>Q</kbd></dt><dd>hovering a word: create a card</dd>
+        <dt><kbd>E</kbd></dt><dd>hovering a word: send it and its sentence to the card creator</dd>
+        <dt><kbd>E</kbd></dt><dd>hovering the picture (away from text): add this frame to the card</dd>
+        <dt><kbd>Q</kbd></dt><dd>hovering a word: one-click card (no frame image)</dd>
         <dt><kbd>⌥</kbd> <kbd>T</kbd></dt><dd>Migaku's translator</dd>
         <dt><kbd>1</kbd>–<kbd>4</kbd></dt><dd>unknown · track · known · ignore</dd>
       </dl>
-      <p>The frame is on your clipboard too, for pasting into a card.</p>
+      <p>Card with the game frame: <kbd>E</kbd> on the word, then <kbd>E</kbd> on the picture. Turn off image
+        search in the card creator's settings to skip Migaku's stock image. The frame is on your clipboard too.</p>
     </div>
   </div>
 <script>
@@ -143,6 +150,7 @@ addEventListener("unhandledrejection", (e) => reportError(String(e.reason && e.r
 const params = new URLSearchParams(location.search);
 const frame = params.get("frame");
 const stage = document.getElementById("stage");
+const overlay = document.getElementById("overlay");
 const img = document.getElementById("shot");
 let ocr;
 
@@ -311,11 +319,12 @@ new MutationObserver(() => { clearTimeout(pending); pending = setTimeout(layout,
 
 async function load() {
   ocr = await (await fetch(`frames/${frame}/ocr.json`)).json();
+  // The picture is its own page (see picture.html) so Migaku's "hover image + E" works.
   img.onload = layout;
-  img.src = `frames/${frame}/shot.png`;
+  img.src = `picture.html?frame=${frame}`;
   const transcript = document.getElementById("transcript");
   for (const idx of ocr.blocks) {
-    const block = stage.appendChild(document.createElement("div"));
+    const block = overlay.appendChild(document.createElement("div"));
     block.className = "block";
     for (const i of idx) {
       const el = block.appendChild(document.createElement("span"));
@@ -327,13 +336,13 @@ async function load() {
     transcript.appendChild(document.createElement("p")).textContent = block.dataset.text;
     // Speaker name tags (one short line, no punctuation) don't get a translate button.
     if (idx.length === 1 && block.dataset.text.length <= 12 && !/[「『。、！？!?…]/.test(block.dataset.text)) continue;
-    block.tlBtn = stage.appendChild(document.createElement("button"));
+    block.tlBtn = overlay.appendChild(document.createElement("button"));
     block.tlBtn.className = "tl-btn";
     block.tlBtn.dataset.label = "EN";
     block.tlBtn.title = "Translate (y)";
     block.tlBtn.onclick = () => toggleTranslation(block);
     block.tlBtn.onmouseenter = () => (hoveredBlock = block);
-    block.tlCaption = stage.appendChild(document.createElement("div"));
+    block.tlCaption = overlay.appendChild(document.createElement("div"));
     block.tlCaption.className = "tl-caption";
     block.tlCaption.lang = "en";
     block.tlCaption.hidden = true;
@@ -428,19 +437,6 @@ if (params.has("translate")) setTimeout(async () => {
   });
   fetch("/debug", { method: "POST", body: "TRANSLATIONS\n" + out.join("\n") });
 }, 4000);
-// Dev aid: when Migaku's card creator opens, post its DOM so the image field can be found.
-(function watchCardCreator() {
-  const root = document.getElementById("MigakuShadowDom")?.shadowRoot;
-  if (!root) return setTimeout(watchCardCreator, 1000);
-  let sent = false, timer;
-  new MutationObserver(() => {
-    const open = [...root.querySelectorAll("[class]")].some((e) => /CardCreator/i.test(e.className));
-    if (!open) { sent = false; return; }
-    if (sent) return;
-    clearTimeout(timer);
-    timer = setTimeout(() => { sent = true; postDom(); }, 1500);
-  }).observe(root, { childList: true, subtree: true });
-})();
 // Older/newer links from the frame list (newest first).
 const $prev = document.getElementById("prev"), $next = document.getElementById("next");
 fetch("/api/frames").then((r) => r.json()).then((frames) => {
