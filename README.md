@@ -128,7 +128,7 @@ python3 make_test_image.py         # regenerate the synthetic samples (macOS fon
 `viewer.html?debug` posts script errors and the overlay/Migaku DOM to `data/debug/dom.html`.
 
 CI (`.github/workflows/docker.yml`) builds the image and runs the config and smoke tests on every
-push and pull request. Pushing a version tag also publishes `ghcr.io/chatton/migaku-games` for
+push. Pushing a version tag also publishes `ghcr.io/chatton/migaku-games` for
 linux/amd64 and linux/arm64 (`latest`, `1.2.3`, `1.2`):
 
 ```sh
