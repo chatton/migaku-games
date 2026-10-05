@@ -13,7 +13,9 @@ RUN pip install -r requirements-meiki.txt
 RUN python -c "from meikiocr import MeikiOCR; MeikiOCR()" && chmod -R a+rX /opt/hf
 ENV HF_HUB_OFFLINE=1
 
-COPY pipeline.py server.py steam_watcher.py migaku_games.py ./
+COPY pipeline.py server.py config.py steam_watcher.py migaku_games.py ./
+# The default config; compose mounts ./config over it.
+COPY config/config.yaml /config/config.yaml
 COPY ocr/meiki_ocr.py ocr/
 COPY web/ web/
 
@@ -21,7 +23,7 @@ ENV MIGAKU_OCR=meiki \
     MIGAKU_HOST=0.0.0.0 \
     MIGAKU_PORT=8765 \
     MIGAKU_DATA=/data \
-    MIGAKU_RETENTION_HOURS=24
+    MIGAKU_CONFIG=/config/config.yaml
 VOLUME /data
 EXPOSE 8765
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \

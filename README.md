@@ -24,7 +24,8 @@ Then:
 1. In Brave, install Migaku and log in.
 2. Bind `python3 ~/migaku-games/migaku_games.py --overlay` to a global shortcut (KDE: System
    Settings → Shortcuts → Add New → Command or Script, e.g. `Meta+J`).
-3. Open http://localhost:8765/settings.html and add a profile for the game you're playing.
+3. Edit `config/config.yaml`: add a profile for the game you're playing and make it `active_profile`
+   (see [Config](#config)).
 4. Run the game borderless windowed (exclusive fullscreen games minimise when covered).
 
 With rootless podman, `systemctl --user enable podman-restart` brings the container back after a
@@ -56,15 +57,37 @@ or drop/paste an image on the gallery page.
 - **Frames** (`/`): every capture, newest first, filterable by game. Pin to keep, or delete.
 - **Viewer**: the frame with hoverable text. Translate all boxes, show the OCR text or a
   transcript, resize and drag translation captions, step through older/newer frames.
-- **Settings** (`/settings.html`): frame retention and game profiles.
+- **Config** (`/settings.html`): the loaded config, warnings and errors, and the **Reload config** button.
 
 `web/` is mounted into the container, so UI edits show up on reload; Python changes need
 `docker compose up -d --build`.
 
-## Game profiles
+## Config
 
-Make one profile per game and select it when you play. Overlay captures are tagged with its name,
-and it holds the per-game options, saved in `data/settings.json`.
+Everything about how the app behaves is declared in one file, `config/config.yaml` (mounted
+read-only at `/config`; the shipped file documents every option):
+
+```yaml
+ocr_engine: meiki          # optional; default: the server's
+retention_hours: 24        # unpinned frames older than this are deleted; 0 keeps them
+active_profile: ff8
+profiles:
+  ff8:
+    name: Final Fantasy VIII
+    freeze: false          # experimental, see below
+    process: ""
+keybindings:               # viewer shortcuts; unlisted ones keep their defaults
+  translate: y
+```
+
+Edit it, then press **Reload config** on the Config page. An invalid file (unknown keys, a missing
+active profile, two actions on one key, ...) is rejected with the reason shown there, and the
+previous config stays in force. Keybindings that clash with Migaku's own keys get a warning.
+Open viewers pick up new keybindings when they next get focus. Frames and pins are runtime state
+in `./data`, not config.
+
+**Game profiles:** one per game; switch `active_profile` when you switch games. Overlay captures
+are tagged with the active profile's name (the gallery filters by it).
 
 **Freeze the game (experimental, Linux):** while the overlay is up, the game's processes are paused
 (SIGSTOP) and resumed (SIGCONT) when you hide it, so nothing moves on while you read. With no
@@ -72,11 +95,6 @@ process name set, the running Steam game is frozen (found by Steam's `reaper Ste
 process); otherwise the process whose executable name contains the given text (`duckstation`,
 `retroarch`, ...). Not for online games. If a game is ever left frozen:
 `python3 migaku_games.py --resume`.
-
-## Retention
-
-Unpinned frames are deleted after 24 hours (`MIGAKU_RETENTION_HOURS` in `compose.yaml`; 0 keeps
-them). The settings page overrides it. Frames live in `./data/frames`.
 
 ## Steam screenshots (optional)
 
@@ -107,15 +125,17 @@ set `STEAM_DIR` in a `.env` file next to `compose.yaml` for other installs (Flat
 
 ```sh
 docker compose up -d --build
-# End-to-end checks, against a throwaway container so your frames and settings aren't touched:
-docker run --rm -d --name migaku-smoke -p 8799:8765 ghcr.io/chatton/migaku-games:latest
-python3 tests/smoke_test.py http://localhost:8799 && docker stop migaku-smoke
+python3 -m unittest tests.test_config   # config validation (needs PyYAML, e.g. .venv)
+# End-to-end checks, against a throwaway container and config folder (the test rewrites it):
+mkdir -p /tmp/smoke-config && cp config/config.yaml /tmp/smoke-config/
+docker run --rm -d --name migaku-smoke -p 8799:8765 -v /tmp/smoke-config:/config ghcr.io/chatton/migaku-games:latest
+python3 tests/smoke_test.py http://localhost:8799 /tmp/smoke-config && docker stop migaku-smoke
 python3 make_test_image.py         # regenerate the synthetic samples (macOS font)
 ```
 
 `viewer.html?debug` posts script errors and the overlay/Migaku DOM to `data/debug/dom.html`.
 
-CI (`.github/workflows/docker.yml`) builds the image and runs the smoke test on every push and
+CI (`.github/workflows/docker.yml`) builds the image and runs the config and smoke tests on every push and
 pull request, then publishes `ghcr.io/chatton/migaku-games` for linux/amd64 and linux/arm64 from
 `main` (`latest`, `sha-…`) and `v*` tags (`1.2.3`, `1.2`).
 

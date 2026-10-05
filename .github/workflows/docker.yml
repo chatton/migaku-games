@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Compile Python
-        run: python -m py_compile migaku_games.py steam_watcher.py pipeline.py server.py ocr/meiki_ocr.py tests/smoke_test.py
+        run: python -m py_compile migaku_games.py steam_watcher.py pipeline.py server.py config.py ocr/meiki_ocr.py tests/*.py
       - uses: docker/setup-buildx-action@v3
       - name: Build image
         uses: docker/build-push-action@v6
@@ -35,10 +35,13 @@ jobs:
           tags: migaku-games:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Config tests
+        run: docker run --rm -v "$PWD:/src" -w /src migaku-games:ci python -m unittest -v tests.test_config
       - name: Smoke test
         run: |
-          docker run -d --name migaku -p 8765:8765 migaku-games:ci
-          python tests/smoke_test.py http://localhost:8765
+          mkdir "$RUNNER_TEMP/config" && cp config/config.yaml "$RUNNER_TEMP/config/"
+          docker run -d --name migaku -p 8765:8765 -v "$RUNNER_TEMP/config:/config" migaku-games:ci
+          python tests/smoke_test.py http://localhost:8765 "$RUNNER_TEMP/config"
       - name: Server logs
         if: always()
         run: docker logs migaku || true

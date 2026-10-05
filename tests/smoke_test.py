@@ -1,10 +1,11 @@
 """End-to-end check of a running frame server (stdlib only). CI runs it against the built image.
 
-    python3 tests/smoke_test.py [http://localhost:8765]
+    python3 tests/smoke_test.py [http://localhost:8765 [CONFIG_DIR]]
 
 Uploads samples/ff8_dialogue.png (synthetic, from make_test_image.py), checks the OCR text, the
-async upload path, the live-viewer endpoints and settings validation, then deletes what it made
-and restores the settings.
+async upload path, the live-viewer endpoints and the config, then deletes what it made. Given
+CONFIG_DIR (the folder mounted at /config in the container), it also checks config reloads:
+it writes config.yaml there, so point it at a throwaway container, never your real config.
 """
 import json
 import sys
@@ -14,6 +15,7 @@ import urllib.request
 from pathlib import Path
 
 SERVER = (sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8765").rstrip("/")
+CONFIG_DIR = Path(sys.argv[2]) if len(sys.argv) > 2 else None
 SAMPLE = Path(__file__).resolve().parent.parent / "samples" / "ff8_dialogue.png"
 
 
@@ -41,6 +43,7 @@ def wait_for_server():
 def main():
     cfg = wait_for_server()
     assert "meiki" in cfg["engines"], cfg
+    assert cfg["error"] is None and cfg["keybindings"]["translate"], cfg
     created = []
     try:
         for page in ("/", "/viewer.html", "/settings.html", "/picture.html"):
@@ -71,19 +74,32 @@ def main():
         call("POST", "/api/frames", b"not an image", 400)
         call("GET", "/api/frames/20000101-000000/ocr", expect=404)
 
-        # Settings: a valid profile saves; invalid input is rejected.
-        call("PUT", "/api/config", {"profiles": {"psmoke": {"name": "Smoke", "freeze": True}}})
-        cfg2 = call("PUT", "/api/config", {"active_profile": "psmoke"})
-        assert cfg2["active_profile"] == "psmoke" and cfg2["profiles"]["psmoke"]["freeze"] is True
-        call("PUT", "/api/config", {"active_profile": "missing"}, 400)
-        call("PUT", "/api/config", {"profiles": {"x": {"name": ""}}}, 400)
-        call("PUT", "/api/config", {"retention_hours": -1}, 400)
-        print("ok   settings")
+        if CONFIG_DIR:
+            check_reload()
     finally:
         for frame_id in created:
             call("DELETE", f"/api/frames/{frame_id}")
-        call("PUT", "/api/config", {"profiles": cfg["profiles"], "active_profile": cfg["active_profile"]})
     print("all smoke tests passed")
+
+
+def check_reload():
+    """A valid file applies on reload; an invalid one is rejected and the previous config stays."""
+    path = CONFIG_DIR / "config.yaml"
+    path.write_text("active_profile: smoke\nprofiles:\n  smoke: {name: Smoke, freeze: true}\n"
+                    "keybindings: {translate: j}\nretention_hours: 0\n")
+    cfg = call("POST", "/api/config/reload")
+    assert cfg["active_profile"] == "smoke" and cfg["profiles"]["smoke"]["freeze"] is True, cfg
+    assert cfg["keybindings"]["translate"] == "j" and cfg["retention_hours"] == 0, cfg
+
+    path.write_text("active_profile: missing\n")
+    bad = call("POST", "/api/config/reload", expect=400)
+    assert "missing" in bad["error"] and bad["active_profile"] == "smoke", bad
+    assert call("GET", "/api/config")["error"], "the error stays visible until a good reload"
+
+    path.write_text("")
+    cfg = call("POST", "/api/config/reload")
+    assert cfg["error"] is None and cfg["profiles"] == {}, cfg
+    print("ok   config reload")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,43 @@
+# migaku-games config. Mounted read-only into the container (compose.yaml); after editing,
+# press "Reload config" on the Config page (http://localhost:8765/settings.html). An invalid
+# file is rejected with an error there and the previous config stays active.
+
+# OCR engine: meiki (the container's) or vision (macOS only, native server). Default: the
+# server's (--ocr / MIGAKU_OCR).
+# ocr_engine: meiki
+
+# Delete unpinned frames older than this many hours. 0 keeps them forever.
+retention_hours: 24
+
+# Game profiles. The active one tags overlay captures with its name (the gallery filters by
+# it) and holds per-game options. Switch games by changing active_profile and reloading.
+active_profile: ff8
+
+profiles:
+  ff8:
+    name: Final Fantasy VIII
+    # Experimental (Linux): pause the game's processes while the overlay is up.
+    freeze: false
+    # Which process to freeze. Empty: the running Steam game. Otherwise part of the executable's
+    # name, e.g. duckstation, retroarch.
+    process: ""
+
+  # chrono-cross:
+  #   name: Chrono Cross
+  #   freeze: true
+  #   process: duckstation
+
+# Viewer shortcuts (KeyboardEvent.key values). Unlisted actions keep their defaults:
+#   translate: y            translate the hovered dialogue box
+#   translate_all: t        translate every dialogue box
+#   toggle_ocr_text: v      show the OCR text over the picture
+#   toggle_transcript: h    transcript
+#   caption_larger: "+"     larger captions
+#   caption_smaller: "-"    smaller captions
+#   previous_frame: "["     older frame
+#   next_frame: "]"         newer frame
+#   help: "?"               shortcut sheet
+# Avoid Migaku's own page keys (E, Q, 1-4, ...). The overlay hotkey itself is a desktop
+# shortcut (KDE: System Settings > Shortcuts), not set here.
+keybindings:
+  translate: y

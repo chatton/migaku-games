@@ -1,19 +1,18 @@
 """Frame server: web UI, OCR, frame storage and retention.
 
     python3 server.py                       # http://localhost:8765
-    python3 server.py --ocr meiki --retention-hours 48 --data ./data
+    python3 server.py --ocr meiki --data ./data --config ./config/config.yaml
 
-Every option can also come from the environment (what the container uses):
-MIGAKU_OCR, MIGAKU_HOST, MIGAKU_PORT, MIGAKU_DATA, MIGAKU_RETENTION_HOURS.
+The options can also come from the environment (what the container uses):
+MIGAKU_OCR, MIGAKU_HOST, MIGAKU_PORT, MIGAKU_DATA, MIGAKU_CONFIG.
 
-Retention set from the web UI is saved to <data>/settings.json and takes precedence over
-the flag/env default from then on. Pinned frames are never pruned; 0 hours keeps everything.
+How the app behaves (retention, game profiles, keybindings, OCR engine) is declared in the
+config file (see config.py and config/config.yaml); the web UI shows it and reloads it on
+demand. Pinned frames are never pruned; 0 retention hours keeps everything.
 
 API
-  GET    /api/config                     engine, engines, retention_hours, profiles, active_profile
-  PUT    /api/config                     any of {"retention_hours": N,
-                                           "profiles": {id: {"name", "freeze", "process"}},
-                                           "active_profile": id | null}
+  GET    /api/config                     the loaded config, plus engines, warnings, error, path
+  POST   /api/config/reload              re-read the config file; 400 (old config kept) if invalid
   GET    /api/frames                     newest first
   POST   /api/frames[?ocr=ENGINE&game=NAME&wait=0]
                                          body: image bytes -> {"id", "url", "lines"}; with wait=0
@@ -43,6 +42,7 @@ from urllib.parse import parse_qsl
 from PIL import Image
 
 import pipeline
+from config import ACTIONS, ConfigError, load_config, parse
 
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
@@ -61,15 +61,13 @@ def write_json(path: Path, obj) -> None:
 class Store:
     """Frames live in <data>/frames/<id>/{shot.png, ocr.json[, pinned]}."""
 
-    def __init__(self, data: Path, engine: str, retention_hours: float):
+    def __init__(self, data: Path, engine: str, config_path: Path):
         self.data = data
         self.frames = data / "frames"
         self.frames.mkdir(parents=True, exist_ok=True)
-        self.settings_path = data / "settings.json"
-        self.engine = engine
-        self.default_retention = retention_hours
+        self.default_engine = engine
+        self.config_path = config_path
         self.id_lock = threading.Lock()
-        self.settings_lock = threading.Lock()
         self.ocr_lock = threading.Lock()  # one OCR process at a time
         self.pending = {}  # frame id -> Event, set when its OCR has finished
         self.summaries = {}  # frame id -> the parts of its list() entry that come from ocr.json
@@ -77,57 +75,37 @@ class Store:
         self.cond = threading.Condition()
         self.latest = self.newest()
         self.live = {"seen": 0.0, "waiting": 0, "focused": False, "frame": None}
-        # Only this process writes settings.json, so it's read once and kept in memory.
+        # The declarative config. A file that fails to load at start leaves the defaults in
+        # place and the error on show in the web UI; a failed reload keeps the previous config.
+        self.config, self.config_warnings, self.config_error = parse(None)[0], [], None
+        self.config_loaded = 0.0
         try:
-            self.settings = json.loads(self.settings_path.read_text())
-        except (OSError, ValueError):
-            self.settings = {}
+            self.reload_config()
+        except ConfigError as e:
+            self.config_error = str(e)
+            print(f"config: {e}", file=sys.stderr, flush=True)
 
-    # --- settings -------------------------------------------------------------------
-    def save_settings(self, **changes) -> None:
-        with self.settings_lock:
-            self.settings = {**self.settings, **changes}
-            write_json(self.settings_path, self.settings)
+    # --- config ---------------------------------------------------------------------
+    def reload_config(self) -> None:
+        """Re-read the config file; on error (ConfigError) the current config stays."""
+        config, warnings = load_config(self.config_path)
+        self.config, self.config_warnings, self.config_error = config, warnings, None
+        self.config_loaded = time.time()
+        for w in warnings:
+            print(f"config: {w}", flush=True)
+
+    @property
+    def engine(self) -> str:
+        return self.config["ocr_engine"] or self.default_engine
 
     def retention_hours(self) -> float:
-        try:
-            return float(self.settings["retention_hours"])
-        except (KeyError, ValueError, TypeError):
-            return self.default_retention
+        return self.config["retention_hours"]
 
-    def set_retention_hours(self, hours: float) -> None:
-        if hours < 0:
-            raise ValueError("retention_hours must be >= 0")
-        self.save_settings(retention_hours=hours)
-
-    # Game profiles, made in the settings page. One is active; the capture client tags frames
-    # with its name and takes the experimental freeze settings from it. Ids are stable, so a
-    # profile can be renamed.
-    def profiles(self) -> dict:
-        return self.settings.get("profiles", {})
-
-    def active_profile(self):
-        active = self.settings.get("active_profile")
-        return active if active in self.profiles() else None
-
-    def set_profiles(self, profiles) -> None:
-        if not isinstance(profiles, dict):
-            raise ValueError("profiles must be an object")
-        clean = {}
-        for pid, prof in profiles.items():
-            if not (isinstance(prof, dict) and re.fullmatch(r"[\w-]{1,40}", str(pid))):
-                raise ValueError(f"bad profile {pid!r}")
-            name = str(prof.get("name") or "").strip()[:100]
-            if not name:
-                raise ValueError("a profile needs a name")
-            clean[pid] = {"name": name, "freeze": bool(prof.get("freeze")),
-                          "process": str(prof.get("process") or "").strip()[:100]}
-        self.save_settings(profiles=clean)
-
-    def set_active_profile(self, pid) -> None:
-        if pid is not None and pid not in self.profiles():
-            raise ValueError("no such profile")
-        self.save_settings(active_profile=pid)
+    def config_state(self) -> dict:
+        return {**self.config, "engine": self.engine, "engines": list(pipeline.AVAILABLE),
+                "actions": {name: about for name, (_, about) in ACTIONS.items()},
+                "path": str(self.config_path), "loaded": self.config_loaded,
+                "warnings": self.config_warnings, "error": self.config_error}
 
     # --- frames ---------------------------------------------------------------------
     def path(self, frame_id: str) -> Path:
@@ -292,7 +270,7 @@ class Handler(SimpleHTTPRequestHandler):
         body = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")  # API state; also keeps browsers from queueing identical long-polls
+        self.send_header("Cache-Control", "no-store")  # live state, never cached
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -320,16 +298,11 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json({"error": f"{type(e).__name__}: {e}"}, 500)
         return wrapper
 
-    def config(self) -> dict:
-        return {"engine": self.store.engine, "engines": list(pipeline.AVAILABLE),
-                "retention_hours": self.store.retention_hours(), "profiles": self.store.profiles(),
-                "active_profile": self.store.active_profile()}
-
     # --- routes ---------------------------------------------------------------------
     def do_GET(self) -> None:
         path, params = self.route()
         if path == "/api/config":
-            return self.send_json(self.config())
+            return self.send_json(self.store.config_state())
         if path == "/api/frames":
             return self.send_json(self.store.list())
         if path == "/api/live":
@@ -361,6 +334,14 @@ class Handler(SimpleHTTPRequestHandler):
                                     wait=params.get("wait") != "0")
             result["url"] = f"/viewer.html?frame={result['id']}"
             return self.send_json(result, 201)
+        if path == "/api/config/reload":
+            try:
+                self.store.reload_config()
+            except ConfigError as e:
+                self.store.config_error = str(e)
+                return self.send_json({**self.store.config_state(), "error": str(e)}, 400)
+            self.store.prune()  # retention may have changed
+            return self.send_json(self.store.config_state())
         if path == "/api/live":
             body = json.loads(self.read_body() or b"{}")
             self.store.report_live(body.get("focused"), body.get("frame"))
@@ -377,16 +358,6 @@ class Handler(SimpleHTTPRequestHandler):
     @handle_errors
     def do_PUT(self) -> None:
         path, _ = self.route()
-        if path == "/api/config":
-            body = json.loads(self.read_body() or b"{}")
-            if "retention_hours" in body:
-                self.store.set_retention_hours(float(body["retention_hours"]))
-                self.store.prune()
-            if "profiles" in body:
-                self.store.set_profiles(body["profiles"])
-            if "active_profile" in body:
-                self.store.set_active_profile(body["active_profile"])
-            return self.send_json(self.config())
         m = re.match(r"^/api/frames/([^/]+)/pin$", path)
         if m:
             self.store.pin(m.group(1), bool(json.loads(self.read_body() or b"{}").get("pinned", True)))
@@ -425,16 +396,16 @@ def main() -> None:
     p.add_argument("--host", default=env("MIGAKU_HOST", "127.0.0.1"))
     p.add_argument("--port", type=int, default=int(env("MIGAKU_PORT", "8765")))
     p.add_argument("--data", type=Path, default=Path(env("MIGAKU_DATA", str(ROOT / "data"))))
-    p.add_argument("--retention-hours", type=float, default=float(env("MIGAKU_RETENTION_HOURS", "24")),
-                   help="delete unpinned frames older than this (0 = keep forever)")
+    p.add_argument("--config", type=Path, default=Path(env("MIGAKU_CONFIG", str(ROOT / "config" / "config.yaml"))),
+                   help="the YAML config file (retention, profiles, keybindings, ...)")
     args = p.parse_args()
 
-    store = Store(args.data.resolve(), args.ocr, args.retention_hours)
+    store = Store(args.data.resolve(), args.ocr, args.config)
     Handler.store = store
     threading.Thread(target=prune_loop, args=(store,), daemon=True).start()
     server = ThreadingHTTPServer((args.host, args.port), partial(Handler, directory=str(WEB)))
-    print(f"serving on http://{args.host}:{args.port}  ocr={args.ocr}  data={store.data}  "
-          f"retention={store.retention_hours():g}h", flush=True)
+    print(f"serving on http://{args.host}:{args.port}  ocr={store.engine}  data={store.data}  "
+          f"config={args.config}  retention={store.retention_hours():g}h", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

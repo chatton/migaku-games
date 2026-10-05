@@ -10,10 +10,10 @@ services:
     ports:
       - "127.0.0.1:8765:8765"   # localhost only; the capture client and browser are on this machine
     volumes:
-      - ./data:/data            # frames and settings.json
+      - ./data:/data            # frames
+      - ./config:/config:ro     # config.yaml: edit, then "Reload config" in the web UI. The folder,
+                                # not the file, so editors that save by replacing it still work
       - ./web:/app/web:ro       # live UI edits without a rebuild
-    environment:
-      MIGAKU_RETENTION_HOURS: "24"   # default; the settings page can change it
     security_opt:
       - label=disable   # SELinux (Bazzite/Fedora): allow the bind mounts without relabelling them
     restart: unless-stopped

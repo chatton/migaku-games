@@ -115,14 +115,14 @@
   <div id="bar">
     <div class="group">
       <a class="tb" href="/" data-tip="All frames"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></a>
-      <a class="tb" id="prev" data-tip="Older frame  ["><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></a>
-      <a class="tb" id="next" data-tip="Newer frame  ]"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></a>
+      <a class="tb" id="prev" data-action="previous_frame"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></a>
+      <a class="tb" id="next" data-action="next_frame"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></a>
     </div>
     <div class="group">
-      <button class="tb wide" id="btn-translate" data-tip="Translate every dialogue box (or y over one)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h8M8 3v2M5.5 5c.8 3 3 5.5 6 7M10.5 5c-.8 3.2-3 6-6.5 8"/><path d="M13 21l4-10 4 10M14.5 17.5h5"/></svg><span data-label="Translate"></span></button>
-      <button class="tb" id="btn-ocr" aria-pressed="false" data-tip="Show OCR text  v"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7V5h14v2M12 5v14M9 19h6"/></svg></button>
-      <button class="tb" id="btn-transcript" aria-pressed="false" data-tip="Transcript  h"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 10h14M5 14h10M5 18h7"/></svg></button>
-      <span class="seg" data-tip="Caption size  − / +">
+      <button class="tb wide" id="btn-translate" data-action="translate_all"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h8M8 3v2M5.5 5c.8 3 3 5.5 6 7M10.5 5c-.8 3.2-3 6-6.5 8"/><path d="M13 21l4-10 4 10M14.5 17.5h5"/></svg><span data-label="Translate"></span></button>
+      <button class="tb" id="btn-ocr" aria-pressed="false" data-action="toggle_ocr_text"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7V5h14v2M12 5v14M9 19h6"/></svg></button>
+      <button class="tb" id="btn-transcript" aria-pressed="false" data-action="toggle_transcript"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 10h14M5 14h10M5 18h7"/></svg></button>
+      <span class="seg" id="seg-caption" data-tip="Caption size">
         <button class="tb" id="btn-smaller"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12"/></svg></button>
         <span class="seg-label" data-label="Aa"></span>
         <button class="tb" id="btn-larger"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button>
@@ -130,19 +130,12 @@
     </div>
     <div class="group grow"><span id="status"></span></div>
     <div class="group">
-      <a class="tb" href="/settings.html" target="_blank" data-tip="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a>
-      <button class="tb" id="btn-help" aria-pressed="false" data-tip="Shortcuts"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.6M12 17h.01"/></svg></button>
+      <a class="tb" href="/settings.html" target="_blank" data-tip="Config"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a>
+      <button class="tb" id="btn-help" aria-pressed="false" data-action="help"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.6M12 17h.01"/></svg></button>
     </div>
     <div id="help" hidden>
       <h3>This page</h3>
-      <dl>
-        <dt><kbd>y</kbd></dt><dd>translate the hovered dialogue box</dd>
-        <dt><kbd>v</kbd></dt><dd>show the OCR text over the picture</dd>
-        <dt><kbd>h</kbd></dt><dd>transcript</dd>
-        <dt><kbd>−</kbd> <kbd>+</kbd></dt><dd>caption size (drag a caption to move it, double-click to reset)</dd>
-        <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>older / newer frame</dd>
-        <dt>Your hotkey</dt><dd>live window: hide it and go back to the game</dd>
-      </dl>
+      <dl id="help-page"></dl>
       <h3>Migaku</h3>
       <dl>
         <dt><kbd>E</kbd></dt><dd>hovering a word: send it and its sentence to the card creator</dd>
@@ -463,22 +456,51 @@ addEventListener("click", (e) => {
   if (!$("help").hidden && !e.target.closest("#help")) { $("help").hidden = true; press("btn-help", false); }
 });
 
+// Keyboard shortcuts: the actions are fixed here, the keys come from the config file
+// (keybindings), re-read whenever the window gets focus so a config reload applies.
+const actions = {
+  translate: () => {
+    const target = hoveredBlock?.tlBtn ? hoveredBlock : [...stage.querySelectorAll(".block")].find((b) => b.tlBtn);
+    if (target) toggleTranslation(target);
+  },
+  translate_all: translateAll,
+  toggle_ocr_text: toggleOcrText,
+  toggle_transcript: toggleTranscript,
+  caption_larger: () => resizeCaptions(true),
+  caption_smaller: () => resizeCaptions(false),
+  previous_frame: () => $prev.click(),
+  next_frame: () => $next.click(),
+  help: () => $("btn-help").click(),
+};
+let keymap = {};  // key -> action name
+
+async function loadKeybindings() {
+  const cfg = await api("/api/config");
+  keymap = Object.fromEntries(Object.entries(cfg.keybindings).map(([action, key]) => [key, action]));
+  const describe = (action) => cfg.actions[action][0].toUpperCase() + cfg.actions[action].slice(1);
+  for (const el of document.querySelectorAll("[data-action]")) {
+    el.dataset.tip = `${describe(el.dataset.action)}  ${cfg.keybindings[el.dataset.action]}`;
+  }
+  $("seg-caption").dataset.tip = `Caption size  ${cfg.keybindings.caption_smaller} / ${cfg.keybindings.caption_larger}`;
+  const rows = Object.entries(cfg.keybindings).map(([action, key]) => [key, cfg.actions[action]]);
+  rows.push(["drag", "move a translation caption (double-click puts it back)"], ["your hotkey", "live window: hide it and go back to the game"]);
+  $("help-page").replaceChildren(...rows.flatMap(([key, about]) => {
+    const dt = document.createElement("dt"), dd = document.createElement("dd");
+    if (key.length <= 2) dt.appendChild(document.createElement("kbd")).textContent = key;
+    else dt.textContent = key;
+    dd.textContent = about;
+    return [dt, dd];
+  }));
+}
+addEventListener("focus", () => loadKeybindings().catch(() => {}));
+loadKeybindings().catch(() => {});
+
 addEventListener("keydown", (e) => {
   if (e.target.closest?.("input, textarea, [contenteditable]") || e.composedPath()[0]?.isContentEditable) return;
   if (e.altKey || e.metaKey || e.ctrlKey) return;
-  if (e.key === "v") toggleOcrText();
-  if (e.key === "h") toggleTranscript();
-  if (e.key === "[") $prev.click();
-  if (e.key === "]") $next.click();
-  if (e.key === "y") {
-    const target = hoveredBlock?.tlBtn ? hoveredBlock : [...stage.querySelectorAll(".block")].find((b) => b.tlBtn);
-    if (target) toggleTranslation(target);
-  }
-  if (e.key === "+" || e.key === "=") resizeCaptions(true);
-  if (e.key === "-") resizeCaptions(false);
-  if (e.key === "?") $("btn-help").click();
-  if (e.key === "Escape" && !$("help").hidden) $("btn-help").click();
-  if (e.key === "`" && debug) postDom();
+  if (keymap[e.key]) actions[keymap[e.key]]();
+  else if (e.key === "Escape" && !$("help").hidden) $("btn-help").click();
+  else if (e.key === "`" && debug) postDom();
 });
 if (debug && params.has("translate")) setTimeout(async () => {
   for (const b of stage.querySelectorAll(".block")) if (b.tlBtn) await toggleTranslation(b);
@@ -515,7 +537,7 @@ async function follow() {
   let after = "";
   for (;;) {
     try {
-      // no-store: the browser's cache would queue identical waiting requests behind each other.
+      // no-store: live state, never from the browser's cache.
       const { id } = await (await fetch(`/api/latest?after=${after}`, { cache: "no-store" })).json();
       if (id && id !== after) {
         after = id;
