@@ -509,12 +509,18 @@ loadKeybindings().catch(() => {});
 // takes an image from a hovered <img>. So put the frame on the clipboard for Ctrl+V in the card
 // creator. The write starts here, while this page still has focus (the card creator window
 // takes it next); the image itself is passed as a promise and downloads afterwards.
-function copyFrame() {
-  if (!frame || !navigator.clipboard?.write) return;
+function copyFrame(key) {
+  // Failures go to the server log (docker compose logs) as well as the notice.
+  const log = (msg) => fetch("/api/log", { method: "POST", body: `copy frame (${key}): ${msg}` }).catch(() => {});
+  if (!frame) return;
+  if (!navigator.clipboard?.write) return log("clipboard API unavailable");
   const png = fetch(`frames/${frame}/shot.png`).then((r) => r.blob()).then((b) => new Blob([b], { type: "image/png" }));
   navigator.clipboard.write([new ClipboardItem({ "image/png": png })])
     .then(() => notice("Frame copied: Ctrl+V in the card creator adds it to the card"))
-    .catch((err) => notice(`Couldn't copy the frame: ${err.message}`));
+    .catch((err) => {
+      log(`failed (focused=${document.hasFocus()}): ${err.name}: ${err.message}`);
+      notice(`Couldn't copy the frame: ${err.message}`);
+    });
 }
 function notice(text) {
   $("notice").dataset.label = text;
@@ -523,10 +529,16 @@ function notice(text) {
   notice.timer = setTimeout(() => $("notice").classList.remove("show"), 3500);
 }
 
+// Capture phase on window: runs before Migaku's own key handler, which may stop the event.
 addEventListener("keydown", (e) => {
   if (e.target.closest?.("input, textarea, [contenteditable]") || e.composedPath()[0]?.isContentEditable) return;
   if (e.altKey || e.metaKey || e.ctrlKey) return;
-  if (copyFrameOnCard && (e.key === "e" || e.key === "E" || e.key === "q" || e.key === "Q")) copyFrame();
+  if (copyFrameOnCard && "eEqQ".includes(e.key) && e.key.length === 1) copyFrame(e.key);
+}, true);
+
+addEventListener("keydown", (e) => {
+  if (e.target.closest?.("input, textarea, [contenteditable]") || e.composedPath()[0]?.isContentEditable) return;
+  if (e.altKey || e.metaKey || e.ctrlKey) return;
   if (keymap[e.key]) actions[keymap[e.key]]();
   else if (e.key === "Escape" && !$("help").hidden) $("btn-help").click();
   else if (e.key === "`" && debug) postDom();

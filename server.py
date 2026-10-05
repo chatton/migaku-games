@@ -23,6 +23,7 @@ API
   POST   /api/live                       the live viewer reports {"focused", "frame"}
   PUT    /api/frames/<id>/pin            {"pinned": true|false}
   DELETE /api/frames/<id>
+  POST   /api/log                        a line from a page for the server log (e.g. clipboard copies)
   POST   /debug                          viewer posts its DOM here (dev aid)
 """
 import argparse
@@ -345,6 +346,10 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/live":
             body = json.loads(self.read_body() or b"{}")
             self.store.report_live(body.get("focused"), body.get("frame"))
+            self.send_response(204)
+            return self.end_headers()
+        if path == "/api/log":
+            print(f"page: {self.read_body()[:500].decode(errors='replace')}", flush=True)
             self.send_response(204)
             return self.end_headers()
         if path == "/debug":
