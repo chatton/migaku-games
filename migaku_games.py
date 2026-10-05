@@ -8,6 +8,7 @@
     python3 migaku_games.py --overlay       # bind to a hotkey: capture the screen and show it in
                                             # one long-lived Brave window over the game; the same
                                             # key hides that window again
+    python3 migaku_games.py --resume        # unfreeze a game left frozen (experimental freezing)
 
 Capture, clipboard and the browser are host-side; OCR and storage happen in the frame
 server container (compose.yaml). If nothing is listening at the default address, the
@@ -15,7 +16,10 @@ container is started with `docker compose up -d` (or podman).
 """
 import argparse
 import json
+import os
+import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -192,24 +196,115 @@ def wait_live(server: str, until, timeout: float) -> bool:
     return False
 
 
+# --- experimental: freeze the game while the overlay is up (Linux) -----------------------
+# Opt-in per game profile, from the settings page. SIGSTOP pauses every process of the game; SIGCONT
+# resumes them. What was frozen is recorded so any later press (or --resume) can undo it.
+FROZEN = Path(os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()) / "migaku-games-frozen.json"
+
+
+def processes() -> dict:
+    """pid -> (parent pid, argv) for every readable process."""
+    procs = {}
+    for d in Path("/proc").iterdir():
+        if not d.name.isdigit():
+            continue
+        try:
+            ppid = int((d / "stat").read_text().rsplit(")", 1)[1].split()[1])
+            argv = (d / "cmdline").read_bytes().decode(errors="replace").split("\0")
+        except (OSError, ValueError, IndexError):
+            continue
+        procs[int(d.name)] = (ppid, [a for a in argv if a])
+    return procs
+
+
+def game_process(pattern: str):
+    """Root pid of the game to freeze: the process whose executable name contains `pattern`,
+    or with no pattern the running Steam game (Steam starts every game, Proton or native,
+    under `reaper SteamLaunch AppId=N`). None if nothing matches or there's no /proc."""
+    if not Path("/proc").is_dir():
+        return None
+    pattern = pattern.strip().lower()
+    mine = {os.getpid(), os.getppid()}
+    for pid, (_, argv) in processes().items():
+        if not argv or pid in mine:
+            continue
+        if pattern:
+            # Executable name only (Wine paths use backslashes), so an argument can't match.
+            if pattern in re.split(r"[/\\]", argv[0])[-1].lower():
+                return pid
+        elif argv[0].endswith("reaper") and "SteamLaunch" in argv:
+            return pid
+    return None
+
+
+def freeze(game: str, root: int) -> None:
+    procs = processes()
+    children = {}
+    for pid, (ppid, _) in procs.items():
+        children.setdefault(ppid, []).append(pid)
+    tree, todo = [], [root]
+    while todo:
+        pid = todo.pop()
+        tree.append(pid)
+        todo += children.get(pid, [])
+    FROZEN.write_text(json.dumps({"game": game, "pids": tree}))  # recorded first, so it can always be undone
+    for pid in tree:
+        try:
+            os.kill(pid, signal.SIGSTOP)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
+def resume() -> None:
+    try:
+        frozen = json.loads(FROZEN.read_text())
+    except (OSError, ValueError):
+        return
+    for pid in reversed(frozen["pids"]):
+        try:
+            os.kill(pid, signal.SIGCONT)
+        except (ProcessLookupError, PermissionError):
+            pass
+    FROZEN.unlink(missing_ok=True)
+
+
+def get_config(server: str) -> dict:
+    with urllib.request.urlopen(server + "/api/config", timeout=5) as resp:
+        return json.load(resp)
+
+
 def overlay(server: str, engine, game) -> None:
     """The hotkey: hide the live window if it has focus, else capture the screen and show it."""
     state = live_state(server)
     if state["focused"]:
         live_window("hide")
+        resume()
         return
+    resume()  # a game left frozen (the overlay was closed some other way) comes back first
+    cfg = get_config(server)
+    profile = cfg["profiles"].get(cfg.get("active_profile") or "", {})
     with tempfile.TemporaryDirectory() as tmp:
         shot = Path(tmp) / "shot.png"
         capture(shot, full=False, screen=True)
-        copy_image_to_clipboard(shot)
-        frame = upload(server, shot, engine, game, wait=False)  # OCR carries on in the background
-    if not state["open"]:
-        open_browser(server + "/viewer.html?live", app=True)
-        if not wait_live(server, lambda s: s["open"], 15):
-            sys.exit("the live window didn't open; is Brave running?")
-    # Raise it once it shows the new picture, so the old one never flashes up.
-    wait_live(server, lambda s: s["frame"] == frame["id"], 2)
-    live_window("show")
+        if profile.get("freeze"):
+            root = game_process(profile.get("process", ""))
+            if root:
+                freeze(profile["name"], root)
+            else:
+                print(f"freeze: no game process found for {profile['name']}", file=sys.stderr)
+        try:
+            copy_image_to_clipboard(shot)
+            frame = upload(server, shot, engine, game or profile.get("name"), wait=False)  # OCR carries on in the background
+            if not state["open"]:
+                open_browser(server + "/viewer.html?live", app=True)
+                if not wait_live(server, lambda s: s["open"], 15):
+                    sys.exit("the live window didn't open; is Brave running?")
+            # Raise it once it shows the new picture, so the old one never flashes up.
+            wait_live(server, lambda s: s["frame"] == frame["id"], 2)
+            live_window("show")
+        except BaseException:
+            resume()  # never leave the game frozen behind an overlay that didn't appear
+            raise
 
 
 def main() -> None:
@@ -223,7 +318,10 @@ def main() -> None:
     p.add_argument("--no-open", action="store_true", help="don't open the viewer")
     p.add_argument("--overlay", action="store_true",
                    help="capture the screen into the long-lived live window, or hide it if it has focus")
+    p.add_argument("--resume", action="store_true", help="unfreeze a game left frozen by --overlay")
     args = p.parse_args()
+    if args.resume:
+        return resume()
     server = args.server.rstrip("/")
 
     if not server_up(server):

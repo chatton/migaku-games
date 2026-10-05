@@ -10,8 +10,10 @@ Retention set from the web UI is saved to <data>/settings.json and takes precede
 the flag/env default from then on. Pinned frames are never pruned; 0 hours keeps everything.
 
 API
-  GET    /api/config                     engine, engines, retention_hours
-  PUT    /api/config                     {"retention_hours": N}
+  GET    /api/config                     engine, engines, retention_hours, profiles, active_profile
+  PUT    /api/config                     any of {"retention_hours": N,
+                                           "profiles": {id: {"name", "freeze", "process"}},
+                                           "active_profile": id | null}
   GET    /api/frames                     newest first
   POST   /api/frames[?ocr=ENGINE&game=NAME&wait=0]
                                          body: image bytes -> {"id", "url", "lines"}; with wait=0
@@ -60,6 +62,7 @@ class Store:
         self.engine = engine
         self.default_retention = retention_hours
         self.id_lock = threading.Lock()
+        self.settings_lock = threading.Lock()
         self.ocr_lock = threading.Lock()  # one OCR process at a time
         self.pending = {}  # frame id -> Event, set when its OCR has finished
         # Newest frame, and the live viewer's state; the condition wakes waiting viewers.
@@ -68,16 +71,58 @@ class Store:
         self.live = {"seen": 0.0, "waiting": 0, "focused": False, "frame": None}
 
     # --- settings -------------------------------------------------------------------
+    def settings(self) -> dict:
+        try:
+            return json.loads(self.settings_path.read_text())
+        except (OSError, ValueError):
+            return {}
+
+    def save_settings(self, **changes) -> None:
+        with self.settings_lock:
+            settings = {**self.settings(), **changes}
+            tmp = self.settings_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(settings, ensure_ascii=False, indent=2))
+            tmp.replace(self.settings_path)
+
     def retention_hours(self) -> float:
         try:
-            return float(json.loads(self.settings_path.read_text())["retention_hours"])
-        except (OSError, ValueError, KeyError):
+            return float(self.settings()["retention_hours"])
+        except (KeyError, ValueError, TypeError):
             return self.default_retention
 
     def set_retention_hours(self, hours: float) -> None:
         if hours < 0:
             raise ValueError("retention_hours must be >= 0")
-        self.settings_path.write_text(json.dumps({"retention_hours": hours}))
+        self.save_settings(retention_hours=hours)
+
+    # Game profiles, made in the settings page. One is active; the capture client tags frames
+    # with its name and takes the experimental freeze settings from it. Ids are stable, so a
+    # profile can be renamed.
+    def profiles(self) -> dict:
+        return self.settings().get("profiles", {})
+
+    def active_profile(self):
+        active = self.settings().get("active_profile")
+        return active if active in self.profiles() else None
+
+    def set_profiles(self, profiles) -> None:
+        if not isinstance(profiles, dict):
+            raise ValueError("profiles must be an object")
+        clean = {}
+        for pid, prof in profiles.items():
+            if not (isinstance(prof, dict) and re.fullmatch(r"[\w-]{1,40}", str(pid))):
+                raise ValueError(f"bad profile {pid!r}")
+            name = str(prof.get("name") or "").strip()[:100]
+            if not name:
+                raise ValueError("a profile needs a name")
+            clean[pid] = {"name": name, "freeze": bool(prof.get("freeze")),
+                          "process": str(prof.get("process") or "").strip()[:100]}
+        self.save_settings(profiles=clean)
+
+    def set_active_profile(self, pid) -> None:
+        if pid is not None and pid not in self.profiles():
+            raise ValueError("no such profile")
+        self.save_settings(active_profile=pid)
 
     # --- frames ---------------------------------------------------------------------
     def path(self, frame_id: str) -> Path:
@@ -259,12 +304,16 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json({"error": f"{type(e).__name__}: {e}"}, 500)
         return wrapper
 
+    def config(self) -> dict:
+        return {"engine": self.store.engine, "engines": list(pipeline.AVAILABLE),
+                "retention_hours": self.store.retention_hours(), "profiles": self.store.profiles(),
+                "active_profile": self.store.active_profile()}
+
     # --- routes ---------------------------------------------------------------------
     def do_GET(self) -> None:
         path, params = self.route()
         if path == "/api/config":
-            return self.send_json({"engine": self.store.engine, "engines": list(pipeline.AVAILABLE),
-                                   "retention_hours": self.store.retention_hours()})
+            return self.send_json(self.config())
         if path == "/api/frames":
             return self.send_json(self.store.list())
         if path == "/api/live":
@@ -316,9 +365,14 @@ class Handler(SimpleHTTPRequestHandler):
         path, _ = self.route()
         if path == "/api/config":
             body = json.loads(self.read_body() or b"{}")
-            self.store.set_retention_hours(float(body["retention_hours"]))
-            self.store.prune()
-            return self.send_json({"retention_hours": self.store.retention_hours()})
+            if "retention_hours" in body:
+                self.store.set_retention_hours(float(body["retention_hours"]))
+                self.store.prune()
+            if "profiles" in body:
+                self.store.set_profiles(body["profiles"])
+            if "active_profile" in body:
+                self.store.set_active_profile(body["active_profile"])
+            return self.send_json(self.config())
         m = re.match(r"^/api/frames/([^/]+)/pin$", path)
         if m:
             self.store.pin(m.group(1), bool(json.loads(self.read_body() or b"{}").get("pinned", True)))

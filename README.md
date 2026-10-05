@@ -35,6 +35,18 @@ The first press opens the window (`/viewer.html?live`); authorise Migaku on it o
 open. It swaps frames in place, so Migaku stays active. Works for any game: Steam, GOG, emulators.
 Run games borderless windowed so the overlay can cover them.
 
+### Settings and game profiles
+
+`/settings.html` (gear icon in the viewer, link in the gallery) holds frame retention and **game
+profiles**. Make one per game and select it when you play it: overlay captures are tagged with its
+name, and it carries the per-game options. Everything is saved in `data/settings.json`.
+
+**Freeze the game (experimental, Linux):** per profile. While the overlay is up the game's
+processes are paused with SIGSTOP and resumed with SIGCONT when you hide it. With no process name
+set, the running Steam game is frozen (found by Steam's `reaper SteamLaunch` process); otherwise
+the process whose executable name contains the given text (`duckstation`, `retroarch`, ...).
+Not for online games. If a game is ever left frozen: `python3 migaku_games.py --resume`.
+
 The window is raised and hidden with a one-off KWin script over `dbus-send` (KDE Plasma), or
 AppleScript on macOS, which asks once to let the terminal control Brave.
 

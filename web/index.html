@@ -11,8 +11,9 @@
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
+  body { padding-top: var(--migaku-bar, 0px); }
   header {
-    position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;
+    position: sticky; top: var(--migaku-bar, 0px); z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;
     padding: 12px 16px; background: rgba(14, 16, 21, .92); backdrop-filter: blur(6px); border-bottom: 1px solid var(--line);
   }
   h1 { margin: 0; font-size: 17px; font-weight: 650; }
@@ -60,8 +61,7 @@
   <span class="spacer"></span>
   <label>Game <select id="game"><option value="">All</option></select></label>
   <label>OCR <select id="engine"></select></label>
-  <label>Keep frames <input type="number" id="retention" min="0" step="1"> hours</label>
-  <span class="meta">(0 = forever · pinned frames are always kept)</span>
+  <a class="btn" href="/settings.html">Settings</a>
 </header>
 <main>
   <div id="drop">Drop or paste a screenshot here, or <button id="pick">choose a file</button>, to OCR it
@@ -145,7 +145,6 @@ async function refresh() {
 
 async function loadConfig() {
   const cfg = await api("/api/config");
-  $("retention").value = cfg.retention_hours;
   $("engine").replaceChildren(...cfg.engines.map((e) => {
     const o = document.createElement("option");
     o.value = o.textContent = e;
@@ -153,14 +152,6 @@ async function loadConfig() {
     return o;
   }));
 }
-$("retention").onchange = async () => {
-  try {
-    const r = await api("/api/config", { method: "PUT", body: JSON.stringify({ retention_hours: Number($("retention").value) }) });
-    toast(r.retention_hours ? `Keeping frames for ${r.retention_hours} h` : "Keeping frames forever");
-    lastJson = "";
-    refresh();
-  } catch (e) { toast("⚠ " + e.message); }
-};
 
 // Upload: drop, paste or pick an image; it's OCR'd with the selected engine.
 async function uploadFile(file) {
@@ -183,6 +174,15 @@ $("game").onchange = refresh;
 loadConfig();
 refresh();
 setInterval(refresh, 5000);  // new captures from the hotkey/CLI show up on their own
+// Migaku's toolbar sits over the top of the page; measure it and move the header below it.
+function clearMigakuBar() {
+  const host = document.getElementById("MigakuShadowDom");
+  let y = 0;
+  while (host && y < 160 && document.elementFromPoint(innerWidth / 2, y + 1) === host) y += 2;
+  document.documentElement.style.setProperty("--migaku-bar", y + "px");
+}
+setTimeout(clearMigakuBar, 1500);
+addEventListener("resize", clearMigakuBar);
 </script>
 </body>
 </html>
