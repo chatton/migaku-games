@@ -98,3 +98,18 @@ Both print the same JSON (`{width, height, lines: [{text, conf, x, y, w, h}]}`):
   run natively (`python3 server.py --ocr vision`); kept for comparison, not used by default.
 
 On Linux, capture uses `spectacle` (KDE) and the clipboard uses `wl-copy`.
+
+## Stretch goals
+
+Ideas borrowed from other mining tools (GameSentenceMiner, YomiNinja, Game2Text), not built yet:
+
+- **Capture area per profile:** OCR only the dialogue box, dropping watermark and menu noise.
+- **Texthooking for emulators:** exact text from emulated games (e.g. Agent/Frida scripts), pushed
+  into the live window instead of OCR. Migaku only needs text on the page.
+- **More OCR engines:** manga-ocr (via owocr) next to meikiocr, selectable per profile.
+
+**Sentence audio: investigated, not pursued.** Migaku's automatic sentence audio (tab recording,
+Alt+R) is gated to an allowlist of video sites (Netflix, YouTube, Crunchyroll, ...) and its own
+local video player; `E` on a page only sends text or an `<img>`, never `<audio>`, and a page can't
+hand audio to the card creator. The only generic route is manual: paste, drop or upload an audio
+file into the card creator (clips over 3s go to Sentence Audio). Checked against extension 1.30.15.
