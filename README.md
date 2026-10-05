@@ -96,14 +96,6 @@ process); otherwise the process whose executable name contains the given text (`
 `retroarch`, ...). Not for online games. If a game is ever left frozen:
 `python3 migaku_games.py --resume`.
 
-## Steam screenshots (optional)
-
-`docker compose --profile steam up -d` also runs `steam-watcher`, which OCRs every new Steam
-screenshot (F12) into the gallery, tagged with the game's name. It reads `~/.local/share/Steam`;
-set `STEAM_DIR` in a `.env` file next to `compose.yaml` for other installs (Flatpak:
-`~/.var/app/com.valvesoftware.Steam/.local/share/Steam`). Games in other Steam libraries show as
-`app <id>`.
-
 ## How it works
 
 - **Overlay window:** `viewer.html?live` waits on `/api/latest` for new frames (a pending request
@@ -139,7 +131,8 @@ CI (`.github/workflows/docker.yml`) builds the image and runs the config and smo
 pull request, then publishes `ghcr.io/chatton/migaku-games` for linux/amd64 and linux/arm64 from
 `main` (`latest`, `sha-…`) and `v*` tags (`1.2.3`, `1.2`).
 
-`samples/` holds press screenshots of commercial games for OCR testing; keep the repo private.
+`samples/` holds screenshots of commercial games for OCR testing (Famitsu press shots of FF7/8/9 and
+Persona 5 Royal; `ff8r_*` are 1080p Steam store shots of FF8 Remastered in Japanese); keep the repo private.
 
 ## Stretch goals
 

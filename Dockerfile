@@ -13,7 +13,7 @@ RUN pip install -r requirements-meiki.txt
 RUN python -c "from meikiocr import MeikiOCR; MeikiOCR()" && chmod -R a+rX /opt/hf
 ENV HF_HUB_OFFLINE=1
 
-COPY pipeline.py server.py config.py steam_watcher.py migaku_games.py ./
+COPY pipeline.py server.py config.py ./
 # The default config; compose mounts ./config over it.
 COPY config/config.yaml /config/config.yaml
 COPY ocr/meiki_ocr.py ocr/

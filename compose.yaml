@@ -1,5 +1,4 @@
 # docker compose up -d                  (or: podman compose up -d)
-# docker compose --profile steam up -d  also OCRs every new Steam screenshot (steam-watcher)
 #
 # Uses the image CI publishes to GHCR (private: `docker login ghcr.io` first); `--build`
 # builds it from this checkout instead.
@@ -18,15 +17,3 @@ services:
       - label=disable   # SELinux (Bazzite/Fedora): allow the bind mounts without relabelling them
     restart: unless-stopped
 
-  # Optional: OCR every new Steam screenshot (F12). Set STEAM_DIR in .env if Steam isn't at
-  # ~/.local/share/Steam (Flatpak: ~/.var/app/com.valvesoftware.Steam/.local/share/Steam).
-  steam-watcher:
-    profiles: [steam]
-    image: ghcr.io/chatton/migaku-games:latest
-    depends_on: [migaku-games]
-    command: ["python", "steam_watcher.py", "--steam", "/steam", "--server", "http://migaku-games:8765"]
-    volumes:
-      - ${STEAM_DIR:-${HOME}/.local/share/Steam}:/steam:ro
-    security_opt:
-      - label=disable
-    restart: unless-stopped
