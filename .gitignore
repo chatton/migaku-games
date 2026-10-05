@@ -1,0 +1,9 @@
+__pycache__/
+.claude/settings.local.json
+.DS_Store
+.venv/
+build/
+data/
+debug/
+frames/
+web/frames

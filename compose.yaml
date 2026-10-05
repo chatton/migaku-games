@@ -1,0 +1,13 @@
+# docker compose up -d   (or: podman compose up -d, e.g. on Bazzite)
+services:
+  migaku-games:
+    build: .
+    image: migaku-games
+    ports:
+      - "127.0.0.1:8765:8765"   # localhost only; the capture client and browser are on this machine
+    volumes:
+      - ./data:/data
+      - ./web:/app/web:ro   # live UI edits without a rebuild
+    environment:
+      MIGAKU_RETENTION_HOURS: "24"   # default; the web UI can change it (saved in data/settings.json)
+    restart: unless-stopped

@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Migaku Frame</title>
+<style>
+  :root { --bg: #000; --fg: #eee; --panel: #15171c; --muted: #8a8f99; --hl: rgba(255, 230, 0, .35); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: "Hiragino Sans", sans-serif; }
+  body { display: flex; flex-direction: column; }
+  #stage-wrap { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; min-height: 0; }
+  #stage { position: relative; }
+  #stage img { display: block; width: 100%; height: 100%; user-select: none; }
+  /* One element per dialogue block so Migaku takes whole sentences across lines. Migaku
+     splits sentences at hard breaks (<br>, block-level or absolutely positioned children)
+     but not at relatively positioned inline spans, so all of a block's lines sit on one
+     line of text and each is shifted onto its OCR box with position: relative. */
+  .block { position: absolute; left: 0; top: 0; white-space: nowrap; line-height: 1; color: transparent; cursor: text; }
+  .block .line { position: relative; }
+  .block .line:hover { background: var(--hl); }
+  body.show-text .block .line { color: #fff; background: rgba(0, 0, 0, .55); }
+  /* Translate controls live outside .block so Migaku never parses them as dialogue. */
+  .tl-btn {
+    position: absolute; font: 600 11px system-ui, sans-serif; padding: 2px 6px; border-radius: 4px;
+    border: 1px solid #556; background: rgba(20, 22, 30, .8); color: #ccd; cursor: pointer; opacity: .55;
+  }
+  .tl-btn:hover, .tl-btn.busy { opacity: 1; }
+  .tl-caption {
+    position: absolute; font: 20px/1.35 system-ui, sans-serif; cursor: move; touch-action: none; user-select: none; color: #fff; background: rgba(10, 12, 20, .88);
+    border-left: 3px solid #7aa2ff; padding: 6px 10px; border-radius: 4px; white-space: normal;
+  }
+  .tl-caption[hidden] { display: none; }
+  /* Control text is drawn from data attributes via CSS so it isn't in the DOM, where
+     Migaku would parse it as Japanese sentences and rewrite it. */
+  .tl-btn::before, .tl-caption::before { content: attr(data-label); }
+  #transcript { background: var(--panel); padding: 10px 16px; font-size: 22px; line-height: 1.6; max-height: 30vh; overflow: auto; }
+  #transcript p { margin: 0; }
+  #transcript[hidden] { display: none !important; }
+  /* Bottom toolbar. Labels are drawn from data-label via CSS so Migaku doesn't parse them. */
+  #bar {
+    position: relative; display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+    background: linear-gradient(#171a21, #12141a); border-top: 1px solid #262a33;
+    font: 12px system-ui, sans-serif; color: var(--muted); user-select: none;
+  }
+  #bar .group { display: flex; align-items: center; gap: 2px; padding: 0 6px; }
+  #bar .group + .group { border-left: 1px solid #262a33; }
+  #bar .group.grow { flex: 1; min-width: 0; }
+  #bar [data-label]::before { content: attr(data-label); }
+  .tb {
+    position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 30px; min-width: 30px; padding: 0 7px; border: 0; border-radius: 7px; background: transparent;
+    color: #c7cbd4; font: inherit; cursor: pointer; text-decoration: none; transition: background .12s, color .12s;
+  }
+  .tb svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .tb:hover { background: #232733; color: #fff; }
+  .tb:active { transform: translateY(1px); }
+  .tb[aria-pressed="true"] { background: rgba(122, 162, 255, .16); color: #9db8ff; }
+  .tb.busy { color: #9db8ff; animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .5; } }
+  a.tb:not([href]) { opacity: .3; pointer-events: none; }
+  .tb.wide { padding: 0 10px 0 8px; }
+  .seg { display: inline-flex; align-items: center; border: 1px solid #2b303b; border-radius: 8px; margin-left: 4px; }
+  .seg .tb { height: 26px; min-width: 26px; border-radius: 6px; }
+  .seg .tb svg { width: 14px; height: 14px; }
+  .seg-label { padding: 0 2px; color: #c7cbd4; font-weight: 600; }
+  #status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 4px; }
+  #status b { color: #c7cbd4; font-weight: 600; }
+  /* Tooltips */
+  [data-tip]:hover::after {
+    content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+    white-space: pre; padding: 5px 8px; border-radius: 6px; background: #0b0d12; border: 1px solid #2b303b;
+    color: #e8e9ec; font: 12px system-ui, sans-serif; pointer-events: none; z-index: 5;
+  }
+  .seg[data-tip] { position: relative; }
+  .seg .tb[data-tip]:hover::after { display: none; }
+  /* Shortcut sheet */
+  #help {
+    position: absolute; right: 10px; bottom: calc(100% + 8px); width: min(360px, calc(100vw - 20px)); z-index: 6;
+    padding: 12px 14px; border-radius: 10px; background: #0f1218; border: 1px solid #2b303b;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .5); color: #c7cbd4; font: 13px/1.4 system-ui, sans-serif;
+  }
+  #help[hidden] { display: none; }
+  #help h3 { margin: 0 0 6px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  #help h3:not(:first-child) { margin-top: 12px; }
+  #help dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; margin: 0; }
+  #help dt { white-space: nowrap; }
+  #help dd { margin: 0; }
+  #help p { margin: 12px 0 0; color: var(--muted); font-size: 12px; }
+  kbd {
+    display: inline-block; min-width: 20px; padding: 1px 5px; border: 1px solid #343a46; border-bottom-width: 2px;
+    border-radius: 5px; background: #1a1e27; color: #e8e9ec; font: 600 11px/1.4 system-ui, sans-serif; text-align: center;
+  }
+</style>
+</head>
+<body>
+  <div id="stage-wrap"><div id="stage"><img id="shot" alt=""></div></div>
+  <div id="transcript" hidden></div>
+  <div id="bar">
+    <div class="group">
+      <a class="tb" href="/" data-tip="All frames"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></a>
+      <a class="tb" id="prev" data-tip="Older frame  ["><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></a>
+      <a class="tb" id="next" data-tip="Newer frame  ]"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></a>
+    </div>
+    <div class="group">
+      <button class="tb wide" id="btn-translate" data-tip="Translate every dialogue box (or y over one)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h8M8 3v2M5.5 5c.8 3 3 5.5 6 7M10.5 5c-.8 3.2-3 6-6.5 8"/><path d="M13 21l4-10 4 10M14.5 17.5h5"/></svg><span data-label="Translate"></span></button>
+      <button class="tb" id="btn-ocr" aria-pressed="false" data-tip="Show OCR text  v"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7V5h14v2M12 5v14M9 19h6"/></svg></button>
+      <button class="tb" id="btn-transcript" aria-pressed="false" data-tip="Transcript  h"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 10h14M5 14h10M5 18h7"/></svg></button>
+      <span class="seg" data-tip="Caption size  − / +">
+        <button class="tb" id="btn-smaller"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12"/></svg></button>
+        <span class="seg-label" data-label="Aa"></span>
+        <button class="tb" id="btn-larger"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button>
+      </span>
+    </div>
+    <div class="group grow"><span id="status"></span></div>
+    <div class="group">
+      <button class="tb" id="btn-help" aria-pressed="false" data-tip="Shortcuts"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.6M12 17h.01"/></svg></button>
+    </div>
+    <div id="help" hidden>
+      <h3>This page</h3>
+      <dl>
+        <dt><kbd>y</kbd></dt><dd>translate the hovered dialogue box</dd>
+        <dt><kbd>v</kbd></dt><dd>show the OCR text over the picture</dd>
+        <dt><kbd>h</kbd></dt><dd>transcript</dd>
+        <dt><kbd>−</kbd> <kbd>+</kbd></dt><dd>caption size (drag a caption to move it, double-click to reset)</dd>
+        <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>older / newer frame</dd>
+      </dl>
+      <h3>Migaku</h3>
+      <dl>
+        <dt><kbd>E</kbd></dt><dd>hovering the picture: send it to the card creator</dd>
+        <dt><kbd>Q</kbd></dt><dd>hovering a word: create a card</dd>
+        <dt><kbd>⌥</kbd> <kbd>T</kbd></dt><dd>Migaku's translator</dd>
+        <dt><kbd>1</kbd>–<kbd>4</kbd></dt><dd>unknown · track · known · ignore</dd>
+      </dl>
+      <p>The frame is on your clipboard too, for pasting into a card.</p>
+    </div>
+  </div>
+<script>
+// Surface script errors to the server's debug log (no devtools access from the CLI).
+const reportError = (msg) => fetch("/debug", { method: "POST", body: "ERROR " + msg }).catch(() => {});
+addEventListener("error", (e) => reportError(`${e.message} @${e.lineno}:${e.colno}`));
+addEventListener("unhandledrejection", (e) => reportError(String(e.reason && e.reason.stack || e.reason)));
+const params = new URLSearchParams(location.search);
+const frame = params.get("frame");
+const stage = document.getElementById("stage");
+const img = document.getElementById("shot");
+let ocr;
+
+// Box of the first visible glyph in a line, skipping Migaku's furigana and spacers.
+function firstGlyphRect(el) {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => n.parentElement.closest("rt, rp, .migaku-reading") || !n.data.replace(/[\s​]/g, "")
+      ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  });
+  const node = walker.nextNode();
+  if (!node) return null;
+  const start = node.data.search(/[^\s​]/);
+  const range = document.createRange();
+  range.setStart(node, start);
+  range.setEnd(node, start + 1);
+  return range.getBoundingClientRect();
+}
+
+function layout() {
+  if (!ocr) return;
+  const wrap = document.getElementById("stage-wrap").getBoundingClientRect();
+  const aspect = ocr.width / ocr.height;
+  const W = Math.min(wrap.width, wrap.height * aspect), H = W / aspect;
+  stage.style.width = W + "px";
+  stage.style.height = H + "px";
+  // Font size per line is chosen so its natural width matches the OCR box (no transforms:
+  // Migaku positions its highlights from the untransformed layout). Measured on a canvas
+  // so Migaku's DOM changes don't affect it.
+  const ctx = document.createElement("canvas").getContext("2d");
+  ctx.font = `100px ${getComputedStyle(document.body).fontFamily}`;
+  const lines = [...stage.querySelectorAll(".line")];
+  for (const el of lines) {
+    const l = JSON.parse(el.dataset.box);
+    el.style.fontSize = Math.min(100 * l.w * W / (ctx.measureText(l.text).width || 1), l.h * H) + "px";
+    el.style.left = el.style.top = "0px";
+  }
+  // Then measure where each line's first glyph actually landed and shift it onto its box.
+  // Measure everything before moving anything: relative offsets don't affect flow.
+  const origin = stage.getBoundingClientRect();
+  const moves = lines.map((el) => {
+    const l = JSON.parse(el.dataset.box), r = firstGlyphRect(el);
+    if (!r) return null;
+    return [el, l.x * W - (r.left - origin.left), (l.y + l.h / 2) * H - ((r.top + r.bottom) / 2 - origin.top)];
+  });
+  for (const m of moves) if (m) { m[0].style.left = m[1] + "px"; m[0].style.top = m[2] + "px"; }
+  for (const block of stage.querySelectorAll(".block")) if (block.tlBtn) placeControls(block, origin, W);
+}
+
+// Translate button at the end of a block's first line; caption below its last line.
+// Caption text scale, adjustable with +/- and remembered across frames.
+let captionScale = 1;
+try { captionScale = Number(localStorage.getItem("captionScale")) || 1; } catch {}
+
+function placeControls(block, origin, W) {
+  const H = origin.height;
+  const rects = [...block.querySelectorAll(".line")].map((el) => el.getBoundingClientRect());
+  const right = Math.max(...rects.map((r) => r.right)) - origin.left;
+  const left = Math.min(...rects.map((r) => r.left)) - origin.left;
+  const top = Math.min(...rects.map((r) => r.top)) - origin.top;
+  const bottom = Math.max(...rects.map((r) => r.bottom)) - origin.top;
+  block.tlBtn.style.left = Math.min(right + 8, W - 40) + "px";
+  block.tlBtn.style.top = rects[0].top - origin.top + "px";
+
+  const cap = block.tlCaption;
+  const dialogueSize = parseFloat(block.querySelector(".line").style.fontSize) || 20;
+  cap.style.fontSize = Math.max(20, dialogueSize * 0.75) * captionScale + "px";
+  cap.style.maxWidth = Math.max(W - left - 16, W * 0.5) + "px";
+  if (block.tlMoved) {
+    // Dragged: keep the position, stored as stage fractions so it survives resizes.
+    cap.style.left = block.tlMoved.x * W + "px";
+    cap.style.top = block.tlMoved.y * H + "px";
+    return;
+  }
+  // Default: under the dialogue, or above it when there's no room (boxes sit low on screen).
+  cap.style.left = Math.min(left, W - cap.offsetWidth - 8) + "px";
+  const below = bottom + 6, above = top - 6 - cap.offsetHeight;
+  cap.style.top = (below + cap.offsetHeight <= H || above < 0 ? below : above) + "px";
+}
+
+// Drag a caption anywhere; double-click puts it back in its default place.
+function makeDraggable(block) {
+  const cap = block.tlCaption;
+  cap.addEventListener("pointerdown", (e) => {
+    const o = stage.getBoundingClientRect();
+    const startX = e.clientX - cap.offsetLeft, startY = e.clientY - cap.offsetTop;
+    cap.setPointerCapture(e.pointerId);
+    const move = (ev) => {
+      const x = Math.min(Math.max(ev.clientX - startX, 0), o.width - cap.offsetWidth);
+      const y = Math.min(Math.max(ev.clientY - startY, 0), o.height - cap.offsetHeight);
+      block.tlMoved = { x: x / o.width, y: y / o.height };
+      cap.style.left = x + "px";
+      cap.style.top = y + "px";
+    };
+    const up = () => { cap.removeEventListener("pointermove", move); cap.removeEventListener("pointerup", up); };
+    cap.addEventListener("pointermove", move);
+    cap.addEventListener("pointerup", up);
+  });
+  cap.addEventListener("dblclick", () => { block.tlMoved = null; layout(); });
+}
+
+// --- On-demand translation through Migaku's own toolbar translator -------------------
+// Migaku's toolbar (in its open shadow root) has a translator: type Japanese into its
+// "ja" field and the English appears in its "en" field. Driving it from here means the
+// translation comes from the user's Migaku account; no separate API key.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let queue = Promise.resolve();
+
+function translateViaMigaku(text) {
+  const run = async () => {
+    const root = document.getElementById("MigakuShadowDom")?.shadowRoot;
+    if (!root) throw new Error("Migaku extension not active on this page");
+    // The panel's inputs work while it stays hidden. Never open it: Migaku focuses its
+    // input when shown, which then swallows our keyboard shortcuts.
+    if (!root.querySelector(".Toolbar__translator")) throw new Error("Migaku translator not found");
+    const ja = root.querySelector('.Toolbar__translator input[lang="ja"]');
+    const en = root.querySelector('.Toolbar__translator input[lang="en"]');
+    en.value = "";
+    ja.value = text;
+    ja.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    try {
+      for (let i = 0; i < 40; i++) {
+        await sleep(250);
+        // Migaku sometimes wraps the whole translation in straight quotes.
+        if (en.value && ja.value === text) return en.value.replace(/^"([\s\S]*)"$/, "$1");
+      }
+      throw new Error("Migaku translator timed out");
+    } finally {
+      root.activeElement?.blur();
+    }
+  };
+  // One request at a time: they all share Migaku's single translator panel.
+  const result = queue.then(run, run);
+  queue = result.catch(() => {});
+  return result;
+}
+
+async function toggleTranslation(block) {
+  const cap = block.tlCaption;
+  if (!cap.hidden) { cap.hidden = true; return; }
+  cap.hidden = false;
+  layout();
+  if (cap.dataset.done) return;
+  block.tlBtn.classList.add("busy");
+  cap.dataset.label = "translating…";
+  try {
+    cap.dataset.label = await translateViaMigaku(block.dataset.text);
+    cap.dataset.done = "1";
+    layout();
+  } catch (err) {
+    cap.dataset.label = "⚠ " + err.message;
+  } finally {
+    block.tlBtn.classList.remove("busy");
+  }
+}
+
+let hoveredBlock = null;
+stage.addEventListener("mouseover", (e) => {
+  const b = e.target.closest(".block");
+  if (b) hoveredBlock = b;
+});
+
+// Migaku rewrites the text (word spans, ruby) after load, which changes glyph positions.
+let pending;
+new MutationObserver(() => { clearTimeout(pending); pending = setTimeout(layout, 50); })
+  .observe(stage, { childList: true, subtree: true, characterData: true });
+
+async function load() {
+  ocr = await (await fetch(`frames/${frame}/ocr.json`)).json();
+  img.onload = layout;
+  img.src = `frames/${frame}/shot.png`;
+  const transcript = document.getElementById("transcript");
+  for (const idx of ocr.blocks) {
+    const block = stage.appendChild(document.createElement("div"));
+    block.className = "block";
+    for (const i of idx) {
+      const el = block.appendChild(document.createElement("span"));
+      el.className = "line";
+      el.textContent = ocr.lines[i].text;
+      el.dataset.box = JSON.stringify(ocr.lines[i]);
+    }
+    block.dataset.text = idx.map((i) => ocr.lines[i].text).join("");
+    transcript.appendChild(document.createElement("p")).textContent = block.dataset.text;
+    // Speaker name tags (one short line, no punctuation) don't get a translate button.
+    if (idx.length === 1 && block.dataset.text.length <= 12 && !/[「『。、！？!?…]/.test(block.dataset.text)) continue;
+    block.tlBtn = stage.appendChild(document.createElement("button"));
+    block.tlBtn.className = "tl-btn";
+    block.tlBtn.dataset.label = "EN";
+    block.tlBtn.title = "Translate (y)";
+    block.tlBtn.onclick = () => toggleTranslation(block);
+    block.tlBtn.onmouseenter = () => (hoveredBlock = block);
+    block.tlCaption = stage.appendChild(document.createElement("div"));
+    block.tlCaption.className = "tl-caption";
+    block.tlCaption.lang = "en";
+    block.tlCaption.hidden = true;
+    block.tlCaption.title = "Drag to move · double-click to reset · +/- to resize";
+    makeDraggable(block);
+  }
+  const when = ocr.created ? new Date(ocr.created * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : frame;
+  document.getElementById("status").innerHTML = `<b></b> · <span></span>`;
+  document.querySelector("#status b").dataset.label = when;
+  document.querySelector("#status span").dataset.label =
+    `${ocr.engine || "vision"} · ${ocr.blocks.filter((b) => b.length).length} boxes · ${ocr.lines.length} lines`;
+  layout();
+  // Once Migaku has had time to rewrite the page, post the overlay DOM back for debugging.
+  setTimeout(postDom, 4000);
+}
+
+function postDom() {
+  // Alignment check: how far each line's first glyph is from where its OCR box says.
+  const o = stage.getBoundingClientRect(), W = o.width, H = o.height;
+  const report = [...stage.querySelectorAll(".line")].map((el) => {
+    const l = JSON.parse(el.dataset.box), r = firstGlyphRect(el);
+    return r && `${l.text}  dx=${(r.left - o.left - l.x * W).toFixed(1)} dy=${((r.top + r.bottom) / 2 - o.top - (l.y + l.h / 2) * H).toFixed(1)}`;
+  });
+  const sentences = [...stage.querySelectorAll("[data-mgk-sentence]")].map((e) => e.dataset.mgkSentence);
+  const root = document.getElementById("MigakuShadowDom")?.shadowRoot;
+  const migaku = root ? root.innerHTML.replace(/<style[\s\S]*?<\/style>|<svg[\s\S]*?<\/svg>/g, "") : "(no Migaku shadow root)";
+  const body = `<!--\n${report.join("\n")}\nsentences: ${sentences.join(" | ")}\n-->\n${stage.outerHTML}\n\n<!-- MIGAKU UI -->\n${migaku}`;
+  fetch("/debug", { method: "POST", body }).catch(() => {});
+}
+
+addEventListener("resize", layout);
+const $ = (id) => document.getElementById(id);
+const press = (id, on) => $(id).setAttribute("aria-pressed", String(on));
+
+function toggleOcrText() { press("btn-ocr", document.body.classList.toggle("show-text")); }
+function toggleTranscript() {
+  const t = $("transcript");
+  t.hidden = !t.hidden;
+  press("btn-transcript", !t.hidden);
+  layout();
+}
+function resizeCaptions(bigger) {
+  captionScale = Math.min(3, Math.max(0.5, captionScale * (bigger ? 1.15 : 1 / 1.15)));
+  try { localStorage.setItem("captionScale", captionScale); } catch {}
+  layout();
+}
+async function translateAll() {
+  const blocks = [...stage.querySelectorAll(".block")].filter((b) => b.tlBtn);
+  const showing = blocks.length && blocks.every((b) => !b.tlCaption.hidden);
+  if (showing) return blocks.forEach((b) => (b.tlCaption.hidden = true));  // second press hides them
+  $("btn-translate").classList.add("busy");
+  try {
+    for (const b of blocks) if (b.tlCaption.hidden) await toggleTranslation(b);
+  } finally {
+    $("btn-translate").classList.remove("busy");
+  }
+}
+
+$("btn-ocr").onclick = toggleOcrText;
+$("btn-transcript").onclick = toggleTranscript;
+$("btn-smaller").onclick = () => resizeCaptions(false);
+$("btn-larger").onclick = () => resizeCaptions(true);
+$("btn-translate").onclick = translateAll;
+$("btn-help").onclick = (e) => { e.stopPropagation(); $("help").hidden = !$("help").hidden; press("btn-help", !$("help").hidden); };
+addEventListener("click", (e) => {
+  if (!$("help").hidden && !e.target.closest("#help")) { $("help").hidden = true; press("btn-help", false); }
+});
+
+addEventListener("keydown", (e) => {
+  if (e.target.closest?.("input, textarea, [contenteditable]") || e.composedPath()[0]?.isContentEditable) return;
+  if (e.altKey || e.metaKey || e.ctrlKey) return;
+  if (e.key === "v") toggleOcrText();
+  if (e.key === "h") toggleTranscript();
+  if (e.key === "[" && $prev.href) location.href = $prev.href;
+  if (e.key === "]" && $next.href) location.href = $next.href;
+  if (e.key === "y") {
+    const target = hoveredBlock?.tlBtn ? hoveredBlock : [...stage.querySelectorAll(".block")].find((b) => b.tlBtn);
+    if (target) toggleTranslation(target);
+  }
+  if (e.key === "+" || e.key === "=") resizeCaptions(true);
+  if (e.key === "-") resizeCaptions(false);
+  if (e.key === "?") $("btn-help").click();
+  if (e.key === "Escape" && !$("help").hidden) $("btn-help").click();
+  if (e.key === "`") postDom();
+});
+if (params.has("translate")) setTimeout(async () => {
+  for (const b of stage.querySelectorAll(".block")) if (b.tlBtn) await toggleTranslation(b);
+  const o = stage.getBoundingClientRect();
+  const out = [...stage.querySelectorAll(".block")].filter((b) => b.tlBtn).map((b) => {
+    const c = b.tlCaption.getBoundingClientRect();
+    return `${b.dataset.text} => ${b.tlCaption.dataset.label}\n  caption ${c.width.toFixed(0)}x${c.height.toFixed(0)} at (${(c.left - o.left).toFixed(0)},${(c.top - o.top).toFixed(0)}) font ${b.tlCaption.style.fontSize} stage ${o.width.toFixed(0)}x${o.height.toFixed(0)}`;
+  });
+  fetch("/debug", { method: "POST", body: "TRANSLATIONS\n" + out.join("\n") });
+}, 4000);
+// Dev aid: when Migaku's card creator opens, post its DOM so the image field can be found.
+(function watchCardCreator() {
+  const root = document.getElementById("MigakuShadowDom")?.shadowRoot;
+  if (!root) return setTimeout(watchCardCreator, 1000);
+  let sent = false, timer;
+  new MutationObserver(() => {
+    const open = [...root.querySelectorAll("[class]")].some((e) => /CardCreator/i.test(e.className));
+    if (!open) { sent = false; return; }
+    if (sent) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => { sent = true; postDom(); }, 1500);
+  }).observe(root, { childList: true, subtree: true });
+})();
+// Older/newer links from the frame list (newest first).
+const $prev = document.getElementById("prev"), $next = document.getElementById("next");
+fetch("/api/frames").then((r) => r.json()).then((frames) => {
+  const i = frames.findIndex((f) => f.id === frame);
+  if (i < 0) return;
+  if (frames[i + 1]) $prev.href = `/viewer.html?frame=${frames[i + 1].id}`;
+  if (frames[i - 1]) $next.href = `/viewer.html?frame=${frames[i - 1].id}`;
+}).catch(() => {});
+if (params.has("show")) toggleOcrText();
+load();
+</script>
+</body>
+</html>
