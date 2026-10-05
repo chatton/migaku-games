@@ -1,25 +1,28 @@
-# docker compose up -d   (or: podman compose up -d, e.g. on Bazzite)
-# Then open http://localhost:8765 and take screenshots with Steam (F12).
+# docker compose up -d                  (or: podman compose up -d)
+# docker compose --profile steam up -d  also OCRs every new Steam screenshot (steam-watcher)
+#
+# Uses the image CI publishes to GHCR (private: `docker login ghcr.io` first); `--build`
+# builds it from this checkout instead.
 services:
   migaku-games:
+    image: ghcr.io/chatton/migaku-games:latest
     build: .
-    image: migaku-games
     ports:
       - "127.0.0.1:8765:8765"   # localhost only; the capture client and browser are on this machine
     volumes:
-      - ./data:/data
-      - ./web:/app/web:ro   # live UI edits without a rebuild
+      - ./data:/data            # frames and settings.json
+      - ./web:/app/web:ro       # live UI edits without a rebuild
     environment:
-      MIGAKU_RETENTION_HOURS: "24"   # default; the web UI can change it (saved in data/settings.json)
+      MIGAKU_RETENTION_HOURS: "24"   # default; the settings page can change it
     security_opt:
       - label=disable   # SELinux (Bazzite/Fedora): allow the bind mounts without relabelling them
     restart: unless-stopped
 
-  # OCRs every new Steam screenshot. Set STEAM_DIR if Steam isn't at ~/.local/share/Steam
-  # (Flatpak: ~/.var/app/com.valvesoftware.Steam/.local/share/Steam,
-  #  macOS: "$HOME/Library/Application Support/Steam").
+  # Optional: OCR every new Steam screenshot (F12). Set STEAM_DIR in .env if Steam isn't at
+  # ~/.local/share/Steam (Flatpak: ~/.var/app/com.valvesoftware.Steam/.local/share/Steam).
   steam-watcher:
-    image: migaku-games
+    profiles: [steam]
+    image: ghcr.io/chatton/migaku-games:latest
     depends_on: [migaku-games]
     command: ["python", "steam_watcher.py", "--steam", "/steam", "--server", "http://migaku-games:8765"]
     volumes:

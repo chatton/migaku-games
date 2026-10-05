@@ -1,103 +1,123 @@
-# migaku-games (POC)
+# migaku-games
 
-Freeze-frame OCR for games: screenshot → Japanese OCR → a local page in Brave where the
-Migaku extension handles hover lookups, card creation and translation.
+Look up Japanese in any game with [Migaku](https://migaku.com): press a hotkey, the screen is
+captured and OCR'd, and a Brave window over the game shows the same picture with hoverable text.
+Migaku's extension does the rest: lookups, translation, and cards with the game frame on them.
 
-Two parts:
+Built for Bazzite (KDE Plasma, desktop mode); also runs on macOS for development.
 
-- **Frame server** (`server.py`, runs in Docker): web UI, OCR (meikiocr), frame storage and
-  retention. http://localhost:8765
-- **Capture client** (`migaku_games.py`, runs on the host, stdlib only): takes the screenshot,
-  copies it to the clipboard, uploads it to the server and opens the viewer in Brave. Starts the
-  container with `docker compose up -d` if it isn't running.
+- **Frame server** (`server.py`, in Docker): OCR ([meikiocr](https://github.com/rtr46/meikiocr),
+  trained on game text), frame storage, and the web UI at http://localhost:8765.
+- **Capture client** (`migaku_games.py`, on the host, stdlib Python): screenshot, upload, and
+  showing/hiding the overlay window.
 
-```sh
-docker compose up -d                     # server + Steam screenshot watcher (podman compose works too)
-python3 migaku_games.py                  # drag-select a screen region
-python3 migaku_games.py --full           # whole screen
-python3 migaku_games.py --image x.png    # use an existing image
-python3 migaku_games.py --app            # chromeless Brave window
-python3 make_test_image.py               # synthetic samples into samples/
-```
-
-## Overlay (the main way to play)
-
-Bind `python3 ~/migaku-games/migaku_games.py --overlay` to a global shortcut (KDE: System
-Settings → Shortcuts → Add New → Command or Script; e.g. `Meta+J`). Then, in the game:
-
-1. Press the key: the screen under the mouse is captured and shown fullscreen in a single
-   long-lived Brave window ("Migaku Live"), lined up with the game. The picture is there at
-   once; the hoverable text follows when OCR finishes (about a second).
-2. Hover words, `y` to translate, `E` for cards.
-3. Press the key again: the window minimises and you're back in the game.
-
-The first press opens the window (`/viewer.html?live`); authorise Migaku on it once and leave it
-open. It swaps frames in place, so Migaku stays active. Works for any game: Steam, GOG, emulators.
-Run games borderless windowed so the overlay can cover them.
-
-### Settings and game profiles
-
-`/settings.html` (gear icon in the viewer, link in the gallery) holds frame retention and **game
-profiles**. Make one per game and select it when you play it: overlay captures are tagged with its
-name, and it carries the per-game options. Everything is saved in `data/settings.json`.
-
-**Freeze the game (experimental, Linux):** per profile. While the overlay is up the game's
-processes are paused with SIGSTOP and resumed with SIGCONT when you hide it. With no process name
-set, the running Steam game is frozen (found by Steam's `reaper SteamLaunch` process); otherwise
-the process whose executable name contains the given text (`duckstation`, `retroarch`, ...).
-Not for online games. If a game is ever left frozen: `python3 migaku_games.py --resume`.
-
-The window is raised and hidden with a one-off KWin script over `dbus-send` (KDE Plasma), or
-AppleScript on macOS, which asks once to let the terminal control Brave.
-
-## Steam screenshots
-
-`docker compose up -d` also starts `steam-watcher`, which OCRs every new Steam screenshot (F12,
-or a controller button mapped in Steam Input) and tags the frame with the game's name. Open
-http://localhost:8765 to see them. Screenshots already there at start are skipped.
-
-It reads Steam from `~/.local/share/Steam` (native Steam, as on Bazzite). Elsewhere, set
-`STEAM_DIR` in a `.env` file next to `compose.yaml`:
+## Setup
 
 ```sh
-STEAM_DIR=$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam   # Flatpak Steam
-STEAM_DIR=$HOME/Library/Application Support/Steam                      # macOS
+gh repo clone chatton/migaku-games ~/migaku-games && cd ~/migaku-games
+docker login ghcr.io                # the image is private: GitHub user + a token with read:packages
+docker compose up -d                # or podman compose; `--build` builds from this checkout instead
 ```
 
-Games installed in another Steam library show as `app <id>`, since only `STEAM_DIR` is mounted.
-`steam_watcher.py` also runs on the host (`--open` opens each frame in Brave, `--dir` watches any
-folder); don't run it alongside the container's or every screenshot is uploaded twice.
+Then:
 
-With rootless podman, `systemctl --user enable podman-restart` brings the containers back after
-a reboot.
+1. In Brave, install Migaku and log in.
+2. Bind `python3 ~/migaku-games/migaku_games.py --overlay` to a global shortcut (KDE: System
+   Settings → Shortcuts → Add New → Command or Script, e.g. `Meta+J`).
+3. Open http://localhost:8765/settings.html and add a profile for the game you're playing.
+4. Run the game borderless windowed (exclusive fullscreen games minimise when covered).
+
+With rootless podman, `systemctl --user enable podman-restart` brings the container back after a
+reboot.
+
+## Playing
+
+1. **Press the hotkey** on some dialogue. The screen under the mouse is shown fullscreen in the
+   "Migaku Live" Brave window, lined up with the game; the hoverable text follows when OCR
+   finishes (about a second). The first press opens that window: authorise Migaku on it once and
+   leave it open. It swaps frames in place, so Migaku stays active.
+2. **Read and mine:** hover words; `y` translates the hovered box (through Migaku's translator);
+   `E` on a word sends it and its sentence to the card creator, then `E` on the picture (away from
+   text) adds the frame. Turn off image search in the card creator's settings to skip Migaku's
+   stock image. `?` lists every shortcut.
+3. **Press the hotkey again** to hide the window and go back to the game.
+
+Works with anything on screen: Steam, GOG, emulators. Other ways in:
+
+```sh
+python3 migaku_games.py                  # drag-select a region, open it in a new tab
+python3 migaku_games.py --image x.png    # an existing image
+```
+
+or drop/paste an image on the gallery page.
 
 ## Web UI
 
-- `/` lists frames (newest first, refreshes itself): open, pin, delete, or drop/paste an image
-  to OCR it. Retention is set here too.
-- The viewer's toolbar: frame navigation, translate (all boxes, or `y` over one, via Migaku's
-  translator), OCR text and transcript toggles, caption size. `?` lists every shortcut,
-  including Migaku's (`E` over the picture sends it to the card creator).
+- **Frames** (`/`): every capture, newest first, filterable by game. Pin to keep, or delete.
+- **Viewer**: the frame with hoverable text. Translate all boxes, show the OCR text or a
+  transcript, resize and drag translation captions, step through older/newer frames.
+- **Settings** (`/settings.html`): frame retention and game profiles.
 
 `web/` is mounted into the container, so UI edits show up on reload; Python changes need
 `docker compose up -d --build`.
 
+## Game profiles
+
+Make one profile per game and select it when you play. Overlay captures are tagged with its name,
+and it holds the per-game options, saved in `data/settings.json`.
+
+**Freeze the game (experimental, Linux):** while the overlay is up, the game's processes are paused
+(SIGSTOP) and resumed (SIGCONT) when you hide it, so nothing moves on while you read. With no
+process name set, the running Steam game is frozen (found by Steam's `reaper SteamLaunch`
+process); otherwise the process whose executable name contains the given text (`duckstation`,
+`retroarch`, ...). Not for online games. If a game is ever left frozen:
+`python3 migaku_games.py --resume`.
+
 ## Retention
 
-Unpinned frames are deleted after `MIGAKU_RETENTION_HOURS` (24 by default, in `compose.yaml`);
-0 keeps everything. Changing it in the web UI saves it to `data/settings.json`, which wins from
-then on. Pinned frames are never deleted. Frames live in `./data/frames`.
+Unpinned frames are deleted after 24 hours (`MIGAKU_RETENTION_HOURS` in `compose.yaml`; 0 keeps
+them). The settings page overrides it. Frames live in `./data/frames`.
 
-## OCR engines
+## Steam screenshots (optional)
 
-Both print the same JSON (`{width, height, lines: [{text, conf, x, y, w, h}]}`):
+`docker compose --profile steam up -d` also runs `steam-watcher`, which OCRs every new Steam
+screenshot (F12) into the gallery, tagged with the game's name. It reads `~/.local/share/Steam`;
+set `STEAM_DIR` in a `.env` file next to `compose.yaml` for other installs (Flatpak:
+`~/.var/app/com.valvesoftware.Steam/.local/share/Steam`). Games in other Steam libraries show as
+`app <id>`.
 
-- `meiki`: [meikiocr](https://github.com/rtr46/meikiocr) (`ocr/meiki_ocr.py`), open source and
-  trained on game text. The container's engine; its models are baked into the image.
-- `vision`: Apple's Vision framework (`ocr/vision_ocr.swift`). macOS only, so it needs the server
-  run natively (`python3 server.py --ocr vision`); kept for comparison, not used by default.
+## How it works
 
-On Linux, capture uses `spectacle` (KDE) and the clipboard uses `wl-copy`.
+- **Overlay window:** `viewer.html?live` waits on `/api/latest` for new frames (a pending request
+  isn't throttled while the window is minimised) and reports its focus to `/api/live`, which is
+  how the hotkey decides between hiding the window and capturing. The window is raised and hidden
+  by a one-off KWin script over `dbus-send` on KDE, or JXA on macOS (asks once to let the terminal
+  control Brave).
+- **Fast first paint:** uploads with `wait=0` return once the picture is saved; OCR runs in the
+  background and `/api/frames/<id>/ocr` waits for it.
+- **Text layout:** each OCR line is a relatively positioned inline span sized to its box, so
+  Migaku reads a dialogue box as whole sentences and its highlights land on the picture's text.
+- **The picture is its own page** (`picture.html` in an iframe): Migaku only sends an image to the
+  card creator from a page with no text in it.
+- **OCR engines:** `meiki` (the container's; models baked into the image) and `vision` (Apple
+  Vision, `ocr/vision_ocr.swift`; macOS only, needs the server run natively with
+  `python3 server.py --ocr vision`). Both print `{width, height, lines: [{text, conf, x, y, w, h}]}`.
+
+## Development
+
+```sh
+docker compose up -d --build
+python3 tests/smoke_test.py        # end-to-end checks against the running server
+python3 make_test_image.py         # regenerate the synthetic samples (macOS font)
+```
+
+`viewer.html?debug` posts script errors and the overlay/Migaku DOM to `data/debug/dom.html`.
+
+CI (`.github/workflows/docker.yml`) builds the image and runs the smoke test on every push and
+pull request, then publishes `ghcr.io/chatton/migaku-games` for linux/amd64 and linux/arm64 from
+`main` (`latest`, `sha-…`) and `v*` tags (`1.2.3`, `1.2`).
+
+`samples/` holds press screenshots of commercial games for OCR testing; keep the repo private.
 
 ## Stretch goals
 

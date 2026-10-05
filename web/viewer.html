@@ -141,6 +141,7 @@
         <dt><kbd>h</kbd></dt><dd>transcript</dd>
         <dt><kbd>−</kbd> <kbd>+</kbd></dt><dd>caption size (drag a caption to move it, double-click to reset)</dd>
         <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>older / newer frame</dd>
+        <dt>Your hotkey</dt><dd>live window: hide it and go back to the game</dd>
       </dl>
       <h3>Migaku</h3>
       <dl>
@@ -155,11 +156,15 @@
     </div>
   </div>
 <script>
-// Surface script errors to the server's debug log (no devtools access from the CLI).
-const reportError = (msg) => fetch("/debug", { method: "POST", body: "ERROR " + msg }).catch(() => {});
-addEventListener("error", (e) => reportError(`${e.message} @${e.lineno}:${e.colno}`));
-addEventListener("unhandledrejection", (e) => reportError(String(e.reason && e.reason.stack || e.reason)));
 const params = new URLSearchParams(location.search);
+// ?debug: post script errors, and the overlay/Migaku DOM a few seconds after each frame (or on
+// the ` key), to the server's data/debug/dom.html. A dev aid; off by default.
+const debug = params.has("debug");
+if (debug) {
+  const reportError = (msg) => fetch("/debug", { method: "POST", body: "ERROR " + msg }).catch(() => {});
+  addEventListener("error", (e) => reportError(`${e.message} @${e.lineno}:${e.colno}`));
+  addEventListener("unhandledrejection", (e) => reportError(String(e.reason && e.reason.stack || e.reason)));
+}
 const live = params.has("live");
 let frame = params.get("frame");
 let dims = null;  // picture size, known before OCR finishes
@@ -399,7 +404,7 @@ function build() {
     `${ocr.engine || "vision"} · ${ocr.blocks.filter((b) => b.length).length} boxes · ${ocr.lines.length} lines`);
   layout();
   // Once Migaku has had time to rewrite the page, post the overlay DOM back for debugging.
-  setTimeout(postDom, 4000);
+  if (debug) setTimeout(postDom, 4000);
 }
 
 function postDom() {
@@ -469,9 +474,9 @@ addEventListener("keydown", (e) => {
   if (e.key === "-") resizeCaptions(false);
   if (e.key === "?") $("btn-help").click();
   if (e.key === "Escape" && !$("help").hidden) $("btn-help").click();
-  if (e.key === "`") postDom();
+  if (e.key === "`" && debug) postDom();
 });
-if (params.has("translate")) setTimeout(async () => {
+if (debug && params.has("translate")) setTimeout(async () => {
   for (const b of stage.querySelectorAll(".block")) if (b.tlBtn) await toggleTranslation(b);
   const o = stage.getBoundingClientRect();
   const out = [...stage.querySelectorAll(".block")].filter((b) => b.tlBtn).map((b) => {
