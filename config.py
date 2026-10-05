@@ -51,7 +51,8 @@ def parse(raw) -> tuple:
     """Validate the parsed YAML document and fill in defaults."""
     warnings = []
     raw = {} if raw is None else _expect(raw, dict, "config")
-    _only(raw, ("ocr_engine", "retention_hours", "active_profile", "profiles", "keybindings"), "config")
+    _only(raw, ("ocr_engine", "retention_hours", "copy_frame_on_card", "active_profile", "profiles", "keybindings"),
+          "config")
 
     engine = raw.get("ocr_engine")
     if engine is not None and engine not in ENGINES:
@@ -60,6 +61,8 @@ def parse(raw) -> tuple:
     hours = raw.get("retention_hours", 24)
     if isinstance(hours, bool) or not isinstance(hours, (int, float)) or hours < 0:
         raise ConfigError(f"retention_hours: expected a number >= 0 (0 keeps frames forever), got {hours!r}")
+
+    copy_frame = _expect(raw.get("copy_frame_on_card", True), bool, "copy_frame_on_card")
 
     profiles = {}
     for pid, prof in (_expect(raw.get("profiles") or {}, dict, "profiles")).items():
@@ -100,6 +103,7 @@ def parse(raw) -> tuple:
     return {
         "ocr_engine": engine,
         "retention_hours": float(hours),
+        "copy_frame_on_card": copy_frame,
         "active_profile": active,
         "profiles": profiles,
         "keybindings": keys,

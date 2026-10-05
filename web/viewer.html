@@ -102,6 +102,12 @@
   #waiting[hidden] { display: none; }
   #waiting::before { content: attr(data-label); }
   #status i { font-style: normal; color: #9db8ff; }
+  /* Short notice (e.g. "frame copied"); text drawn from data-label so Migaku doesn't parse it. */
+  #notice { position: fixed; left: 50%; bottom: 56px; transform: translateX(-50%); z-index: 7; padding: 7px 12px;
+    border-radius: 8px; background: #0f1218; border: 1px solid #2b303b; color: #e8e9ec; font: 13px system-ui, sans-serif;
+    opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #notice.show { opacity: 1; }
+  #notice::before { content: attr(data-label); }
   kbd {
     display: inline-block; min-width: 20px; padding: 1px 5px; border: 1px solid #343a46; border-bottom-width: 2px;
     border-radius: 5px; background: #1a1e27; color: #e8e9ec; font: 600 11px/1.4 system-ui, sans-serif; text-align: center;
@@ -111,6 +117,7 @@
 <body>
   <div id="stage-wrap"><div id="stage"><iframe id="shot" title="Frame picture"></iframe><div id="overlay"></div></div></div>
   <div id="waiting" hidden data-label=""></div>
+  <div id="notice" data-label=""></div>
   <div id="transcript" hidden></div>
   <div id="bar">
     <div class="group">
@@ -144,8 +151,9 @@
         <dt><kbd>⌥</kbd> <kbd>T</kbd></dt><dd>Migaku's translator</dd>
         <dt><kbd>1</kbd>–<kbd>4</kbd></dt><dd>unknown · track · known · ignore</dd>
       </dl>
-      <p>Card with the game frame: <kbd>E</kbd> on the word, then <kbd>E</kbd> on the picture. Turn off image
-        search in the card creator's settings to skip Migaku's stock image. The frame is on your clipboard too.</p>
+      <p>Card with the game frame: <kbd>E</kbd> on the word copies the frame to your clipboard; press
+        <kbd>Ctrl</kbd> <kbd>V</kbd> in the card creator to add it (or <kbd>E</kbd> on the picture, away from text).
+        Turn off image search in the card creator's settings to skip Migaku's stock image.</p>
     </div>
   </div>
 <script src="/common.js"></script>
@@ -473,10 +481,12 @@ const actions = {
   help: () => $("btn-help").click(),
 };
 let keymap = {};  // key -> action name
+let copyFrameOnCard = false;  // config: copy_frame_on_card
 
 async function loadKeybindings() {
   const cfg = await api("/api/config");
   keymap = Object.fromEntries(Object.entries(cfg.keybindings).map(([action, key]) => [key, action]));
+  copyFrameOnCard = cfg.copy_frame_on_card;
   const describe = (action) => cfg.actions[action][0].toUpperCase() + cfg.actions[action].slice(1);
   for (const el of document.querySelectorAll("[data-action]")) {
     el.dataset.tip = `${describe(el.dataset.action)}  ${cfg.keybindings[el.dataset.action]}`;
@@ -495,9 +505,28 @@ async function loadKeybindings() {
 addEventListener("focus", () => loadKeybindings().catch(() => {}));
 loadKeybindings().catch(() => {});
 
+// Migaku's E (card creator) and Q (one-click card) never send the picture with a word: it only
+// takes an image from a hovered <img>. So put the frame on the clipboard for Ctrl+V in the card
+// creator. The write starts here, while this page still has focus (the card creator window
+// takes it next); the image itself is passed as a promise and downloads afterwards.
+function copyFrame() {
+  if (!frame || !navigator.clipboard?.write) return;
+  const png = fetch(`frames/${frame}/shot.png`).then((r) => r.blob()).then((b) => new Blob([b], { type: "image/png" }));
+  navigator.clipboard.write([new ClipboardItem({ "image/png": png })])
+    .then(() => notice("Frame copied: Ctrl+V in the card creator adds it to the card"))
+    .catch((err) => notice(`Couldn't copy the frame: ${err.message}`));
+}
+function notice(text) {
+  $("notice").dataset.label = text;
+  $("notice").classList.add("show");
+  clearTimeout(notice.timer);
+  notice.timer = setTimeout(() => $("notice").classList.remove("show"), 3500);
+}
+
 addEventListener("keydown", (e) => {
   if (e.target.closest?.("input, textarea, [contenteditable]") || e.composedPath()[0]?.isContentEditable) return;
   if (e.altKey || e.metaKey || e.ctrlKey) return;
+  if (copyFrameOnCard && (e.key === "e" || e.key === "E" || e.key === "q" || e.key === "Q")) copyFrame();
   if (keymap[e.key]) actions[keymap[e.key]]();
   else if (e.key === "Escape" && !$("help").hidden) $("btn-help").click();
   else if (e.key === "`" && debug) postDom();

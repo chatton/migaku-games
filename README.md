@@ -38,8 +38,9 @@ reboot.
    finishes (about a second). The first press opens that window: authorise Migaku on it once and
    leave it open. It swaps frames in place, so Migaku stays active.
 2. **Read and mine:** hover words; `y` translates the hovered box (through Migaku's translator);
-   `E` on a word sends it and its sentence to the card creator, then `E` on the picture (away from
-   text) adds the frame. Turn off image search in the card creator's settings to skip Migaku's
+   `E` on a word sends it and its sentence to the card creator and copies the frame to your
+   clipboard; press Ctrl+V in the card creator to add it (`copy_frame_on_card` in the config).
+   Migaku itself only sends a picture from `E` over the picture, away from text. Turn off image search in the card creator's settings to skip Migaku's
    stock image. `?` lists every shortcut.
 3. **Press the hotkey again** to hide the window and go back to the game.
 

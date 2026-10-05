@@ -9,6 +9,11 @@
 # Delete unpinned frames older than this many hours. 0 keeps them forever.
 retention_hours: 24
 
+# When you press Migaku's card keys (E, Q) in the viewer, also copy the frame shown to the
+# clipboard, so Ctrl+V in Migaku's card creator adds it to the card. (E on a word never sends
+# the picture by itself: Migaku only takes an image from a hovered <img>.)
+copy_frame_on_card: true
+
 # Game profiles. The active one tags overlay captures with its name (the gallery filters by
 # it) and holds per-game options. Switch games by changing active_profile and reloading.
 active_profile: ff8

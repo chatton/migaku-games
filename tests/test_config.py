@@ -25,6 +25,7 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(cfg["retention_hours"], 24)
         self.assertIsNone(cfg["active_profile"])
         self.assertEqual(cfg["keybindings"]["translate"], "y")
+        self.assertIs(cfg["copy_frame_on_card"], True)
         self.assertEqual(warnings, [])
 
     def test_missing_file_means_defaults_with_a_warning(self):
@@ -55,6 +56,7 @@ class ParseTest(unittest.TestCase):
             "bad profile id": "profiles:\n  'a b': {}\n",
             "unknown profile key": "profiles:\n  a: {colour: blue}\n",
             "freeze not a bool": "profiles:\n  a: {freeze: maybe}\n",
+            "copy_frame_on_card not a bool": "copy_frame_on_card: yes please\n",
             "unknown action": "keybindings: {fly: f}\n",
             "duplicate key": "keybindings: {translate: v}\n",
             "not a mapping": "- a\n- b\n",
