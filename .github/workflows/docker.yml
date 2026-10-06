@@ -72,9 +72,33 @@ jobs:
             if [ "$1" = desktop ]; then $pm $extra; fi
             tests/check_host_distro.sh "$1"' "${{ matrix.image }}" "${{ matrix.tools }}"
 
+  # The native server via the install script (install.sh -> tools/native.sh): install without a
+  # service, run it, smoke-test it.
+  native:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Lint the scripts
+        run: shellcheck install.sh tools/native.sh
+      - name: Install
+        run: ./install.sh --native --no-service
+      - name: Smoke test
+        run: |
+          tools/native.sh run > "$RUNNER_TEMP/server.out" 2>&1 &
+          python tests/smoke_test.py http://localhost:8765
+          tools/native.sh status
+      - name: Server log
+        if: always()
+        run: cat data/logs/server.log || true
+
   # Images are published only for version tags (git tag v1.2.3 && git push --tags).
   publish:
-    needs: [test, host]
+    needs: [test, host, native]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

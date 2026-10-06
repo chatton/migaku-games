@@ -36,6 +36,7 @@ import logging.handlers
 import os
 import re
 import shutil
+import socketserver
 import sys
 import threading
 import time
@@ -331,7 +332,8 @@ class Store:
 
 class Words:
     """The word matcher for coloured translations (align.py), loaded on first use: Janome and the
-    JMdict table are only in the container image (MIGAKU_JMDICT)."""
+    JMdict table come with the container image, or with a native install (tools/native.sh builds
+    the table into build/); MIGAKU_JMDICT names it."""
 
     def __init__(self):
         self.aligner, self.error, self.lock = None, None, threading.Lock()
@@ -341,7 +343,7 @@ class Words:
             if self.aligner is None and self.error is None:
                 try:
                     from align import Aligner
-                    path = Path(os.environ.get("MIGAKU_JMDICT", "/opt/jmdict.sqlite"))
+                    path = Path(os.environ.get("MIGAKU_JMDICT") or ROOT / "build" / "jmdict.sqlite")
                     if not path.exists():
                         raise FileNotFoundError(f"no JMdict table at {path} (tools/build_jmdict.py)")
                     self.aligner = Aligner(path)
@@ -508,6 +510,14 @@ def hostname(value: str) -> str:
     return value.rsplit(":", 1)[0] if value.count(":") == 1 else value
 
 
+class Server(ThreadingHTTPServer):
+    def server_bind(self) -> None:
+        # HTTPServer.server_bind looks up the host's FQDN, only for a name nothing here uses; on macOS
+        # that reverse lookup can stall startup for ~30s.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
 def prune_loop(store: Store) -> None:
     while True:
         try:
@@ -536,7 +546,7 @@ def main() -> None:
     extra = {h.strip().lower() for h in env("MIGAKU_ALLOWED_HOSTS", "").split(",") if h.strip()}
     Handler.allowed_hosts = LOCAL_HOSTS | extra
     threading.Thread(target=prune_loop, args=(store,), daemon=True).start()
-    server = ThreadingHTTPServer((args.host, args.port), partial(Handler, directory=str(WEB)))
+    server = Server((args.host, args.port), partial(Handler, directory=str(WEB)))
     log.info("serving on http://%s:%d  ocr=%s  config=%s  retention=%gh", args.host, args.port, store.engine,
              args.config, store.retention_hours())
     try:

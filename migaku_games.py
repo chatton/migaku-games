@@ -26,7 +26,7 @@ from pathlib import Path
 
 from migaku_host import browser, capture, desktop, freeze, window
 from migaku_host.notify import notify
-from migaku_host.server_api import DEFAULT_SERVER, ROOT, ensure_server, request, server_up, upload, wait_live
+from migaku_host.server_api import DEFAULT_SERVER, ROOT, ensure_server, native_service, request, server_up, upload, wait_live
 from migaku_host.util import AppError, log, log_file, setup_logging, single_instance, step
 
 ENGINES = ("vision", "meiki")  # the server's pipeline.ENGINES; the container has meiki only
@@ -150,6 +150,8 @@ def doctor(server: str) -> int:
         say(f"browser: {browser.browser_command(d)}")
     except AppError as e:
         say(f"browser: {e}")
+    native = native_service()
+    say(f"frame server deployment: {'native (' + ' '.join(native) + ')' if native else 'container (docker/podman compose)'}")
     for tool in ("docker", "podman", "notify-send", "git"):
         say(f"tool {tool}: {desktop.which(tool) or 'not found'}")
     ok = server_up(server)
@@ -165,7 +167,7 @@ def doctor(server: str) -> int:
         except AppError as e:
             say(f"  {e}")
     say(f"host log: {log_file()}")
-    say("server log: data/logs/server.log in the repo (or `docker compose logs`)")
+    say("server log: data/logs/server.log in the repo (or `docker compose logs`; native: `tools/native.sh status`)")
     print("\n".join(out))
     log.info("doctor:\n%s", "\n".join(out))
     return 0

@@ -11,7 +11,7 @@ no desktop shortcuts, screenshot tool or second window to show the overlay in.
 
 | Part | Runs | What it does |
 |---|---|---|
-| **Frame server** (`server.py`) | Docker / podman, always on | OCR ([meikiocr](https://github.com/rtr46/meikiocr)), web pages, config, frames |
+| **Frame server** (`server.py`) | Docker / podman, or natively as a user service; always on | OCR ([meikiocr](https://github.com/rtr46/meikiocr)), web pages, config, frames |
 | **Brave + Migaku** | your desktop | the "Migaku Live" window and the gallery at http://localhost:8765 |
 | **Hotkey client** (`migaku_games.py`, `migaku_host/`) | your desktop, plain Python 3.9+ (no installs) | started by your OS's shortcut on each press: capture, upload, show/hide the window |
 
@@ -20,7 +20,19 @@ the client, which does its job and exits.
 
 ## Setup
 
-1. **Start the server** (Docker or podman):
+**Quick setup (Linux, macOS)**: clone, then run the install script. It starts the frame server
+(in a container if Docker or podman compose works, otherwise natively), checks this machine with
+`--doctor` and warns about anything missing, and prints the exact hotkey command and where your
+desktop binds it. Run it again after `git pull` to update.
+
+```sh
+git clone https://github.com/chatton/migaku-games.git ~/migaku-games && cd ~/migaku-games
+./install.sh               # or --container / --native; --native --no-service: no user service
+```
+
+Then do steps 3 to 5 below (Brave + Migaku, the hotkey, your game profile). The steps by hand:
+
+1. **Start the server**, in a container (below) or [natively](#native-server-no-container):
 
    ```sh
    git clone https://github.com/chatton/migaku-games.git ~/migaku-games && cd ~/migaku-games
@@ -64,6 +76,34 @@ the client, which does its job and exits.
 behave like borderless windows and the overlay can cover them. If the overlay flickers, the game
 minimises, or captures come out black (common with exclusive fullscreen on Windows), switch the
 game to borderless or windowed.
+
+### Native server (no container)
+
+The same server can run straight from the checkout instead: a Python venv in `.venv`, the OCR
+models and JMdict table cached locally, and a user service that starts it at login (systemd on
+Linux, launchd on macOS). Use it where containers are awkward, or on macOS for Apple's Vision
+OCR. Run either the container or the native server, not both: they share port 8765.
+
+```sh
+git clone https://github.com/chatton/migaku-games.git ~/migaku-games && cd ~/migaku-games
+tools/native.sh install       # venv + packages, models, JMdict (~5 min first time), then the service
+tools/native.sh status        # venv, JMdict, service, and whether the server answers
+```
+
+- **Needs** Python 3.10+ with `venv` (Bazzite/Fedora and macOS with Homebrew Python have it;
+  Debian/Ubuntu: `sudo apt install python3-venv`) and about 1 GB of disk. Another interpreter:
+  `PYTHON=python3.13 tools/native.sh install`.
+- **The service**: `~/.config/systemd/user/migaku-games.service` (Linux; `journalctl --user -u
+  migaku-games`) or `~/Library/LaunchAgents/com.migaku-games.server.plist` (macOS). The hotkey
+  client starts it if the server isn't answering, as it would the container.
+- **Without a service**: `tools/native.sh install --no-service`, then `tools/native.sh run` in a
+  terminal whenever you play.
+- **OCR engine**: meiki on Linux; on macOS the native server defaults to Apple Vision (needs Xcode's
+  command line tools for `swiftc`). Set `ocr_engine: meiki` in the config for meiki there.
+- **Switching from the container**: `docker compose down` (or `podman compose down`) first. If
+  rootful Docker wrote `data/`, it's owned by root: `sudo chown -R "$USER" data`.
+- **Removing it**: `tools/native.sh uninstall` stops and removes the service; delete `.venv/` and
+  `build/` to free the space.
 
 ## Playing
 
@@ -138,7 +178,9 @@ their meanings, so content words match and grammar doesn't.
 ## Updating
 
 ```sh
-cd ~/migaku-games && git pull && docker compose pull && docker compose up -d
+cd ~/migaku-games && git pull && ./install.sh                 # either kind of server
+cd ~/migaku-games && git pull && docker compose pull && docker compose up -d   # or by hand: container
+cd ~/migaku-games && git pull && tools/native.sh install      # or by hand: native (restarts it)
 ```
 
 `web/` and `config/` are mounted from the checkout; the server code comes from the image, so pull
@@ -165,7 +207,7 @@ Both logs carry timestamps with their UTC offset, so they line up.
 | Symptom | Look at |
 |---|---|
 | Pressing the hotkey does nothing | A desktop notification should say why; if not, the shortcut isn't running the command: check the path in the shortcut and the host log |
-| "frame server not reachable" | `docker compose ps` / `docker compose logs`; the client starts the stack itself, but the first start takes a while |
+| "frame server not reachable" | `docker compose ps` / `docker compose logs` (native: `tools/native.sh status`); the client starts the server itself, but the first start takes a while |
 | The live window never comes to the front | `--doctor` for the window backend; on KDE, the journal line above shows how many windows the script matched (it matches Chromium browsers' windows titled "Migaku Live") |
 | A page says 403 / "only answers to localhost" | the server refuses other host names; open it as http://localhost:8765, or add the name to `MIGAKU_ALLOWED_HOSTS` under `environment:` in `compose.yaml` |
 | Hovering does nothing | the server log says on each page load whether Migaku is active; authorise Migaku for `localhost:8765` |
@@ -186,9 +228,9 @@ Both logs carry timestamps with their UTC offset, so they line up.
 - **Platform layer** (`migaku_host/`): one backend per desktop for capture (`capture.py`), the window
   (`window.py`), notifications, freezing and the browser, picked from the detected desktop
   (`desktop.py`) or the config's `host` section.
-- **OCR engines**: `meiki` (the container's; models baked into the image) and `vision` (Apple
-  Vision, `ocr/vision_ocr.swift`; macOS only, needs the server run natively with
-  `python3 server.py --ocr vision`).
+- **OCR engines**: `meiki` (models baked into the image, or cached by `tools/native.sh`) and
+  `vision` (Apple Vision, `ocr/vision_ocr.swift`; macOS only, with the [native
+  server](#native-server-no-container)).
 
 ## Development
 

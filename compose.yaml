@@ -7,7 +7,7 @@ services:
     image: ghcr.io/chatton/migaku-games:latest
     build: .
     ports:
-      - "127.0.0.1:8765:8765"   # localhost only; the capture client and browser are on this machine
+      - "127.0.0.1:${MIGAKU_PORT:-8765}:8765"   # localhost only; the capture client and browser are on this machine
     volumes:
       - ./data:/data            # frames
       - ./config:/config:ro     # config.yaml: edit, then "Reload config" in the web UI. The folder,

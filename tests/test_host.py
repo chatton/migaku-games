@@ -108,6 +108,18 @@ class KWinTest(unittest.TestCase):
         self.assertIsNone(sid(""))
 
 
+class NativeServiceTest(unittest.TestCase):
+    def test_systemd_unit_means_a_native_install(self):
+        from migaku_host import server_api
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": d}), \
+                mock.patch.object(server_api.sys, "platform", "linux"):
+            self.assertIsNone(server_api.native_service())
+            unit = Path(d) / "systemd" / "user" / server_api.NATIVE_UNIT
+            unit.parent.mkdir(parents=True)
+            unit.touch()
+            self.assertEqual(server_api.native_service(), ["systemctl", "--user", "start", server_api.NATIVE_UNIT])
+
+
 class FreezeTest(unittest.TestCase):
     PROCS = {1: (0, ["/sbin/init"]), 100: (1, ["/steam/reaper", "SteamLaunch", "AppId=39150", "--"]),
              101: (100, ["Z:\\games\\FF8_EN.exe"]), 102: (101, ["wineserver"]),
