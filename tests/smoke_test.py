@@ -19,9 +19,9 @@ CONFIG_DIR = Path(sys.argv[2]) if len(sys.argv) > 2 else None
 SAMPLE = Path(__file__).resolve().parent.parent / "samples" / "ff8_dialogue.png"
 
 
-def call(method, path, body=None, expect=200):
+def call(method, path, body=None, expect=200, headers=None):
     data = body if isinstance(body, bytes) or body is None else json.dumps(body).encode()
-    req = urllib.request.Request(SERVER + path, data=data, method=method)
+    req = urllib.request.Request(SERVER + path, data=data, method=method, headers=headers or {})
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
             status, raw = resp.status, resp.read()
@@ -76,6 +76,12 @@ def main():
         listed = {f["id"]: f for f in call("GET", "/api/frames")}
         assert listed[created[0]]["game"] == "smoke"
         print("ok   latest / live / list")
+
+        # Only localhost: another site's page can't write, and a rebound DNS name can't read.
+        call("POST", "/api/live", {"shown": True}, 403, {"Origin": "https://example.com"})
+        call("GET", "/api/frames", expect=403, headers={"Host": "attacker.example:8765"})
+        call("GET", "/api/config", headers={"Origin": "chrome-extension://abc"})  # extensions may read
+        print("ok   localhost only")
 
         call("POST", "/api/frames", b"not an image", 400)
         call("GET", "/api/frames/20000101-000000/ocr", expect=404)

@@ -650,15 +650,21 @@ function notice(text) {
   notice.timer = setTimeout(() => $("notice").classList.remove("show"), 3500);
 }
 
+// Typing in a text field, including Migaku's own (its search and translator inputs are in its
+// shadow root, where e.target is only the shadow host): leave the keys to the field.
+const typing = (e) => {
+  const el = e.composedPath()[0];
+  return !!(el?.closest?.("input, textarea, select, [contenteditable]") || el?.isContentEditable);
+};
 // Capture phase on window: runs before Migaku's own key handler, which may stop the event.
 addEventListener("keydown", (e) => {
-  if (e.target.closest?.("input, textarea, [contenteditable]") || e.composedPath()[0]?.isContentEditable) return;
+  if (typing(e)) return;
   if (e.altKey || e.metaKey || e.ctrlKey) return;
   if (copyFrameOnCard && "eEqQ".includes(e.key) && e.key.length === 1) copyFrame(e.key);
 }, true);
 
 addEventListener("keydown", (e) => {
-  if (e.target.closest?.("input, textarea, [contenteditable]") || e.composedPath()[0]?.isContentEditable) return;
+  if (typing(e)) return;
   if (e.altKey || e.metaKey || e.ctrlKey) return;
   if (keymap[e.key]) actions[keymap[e.key]]();
   else if (e.key === "Escape" && !$("help").hidden) $("btn-help").click();
@@ -713,10 +719,12 @@ async function follow() {
     }
   }
 }
-// The hotkey script asks the server whether this window has focus (if so the key hides it,
-// otherwise it captures the game) and which frame is on screen (it raises the window once the
-// new one is). Focus is read a tick after the event: a blur that only moved focus into the
-// picture's iframe leaves the window focused.
+// The hotkey script asks the server whether this window is shown (if so the key hides it,
+// otherwise it captures the game; becoming hidden or minimised clears "shown") and which frame is
+// on screen (it raises the window once the new one is). Focus isn't part of that decision: Migaku's
+// card creator takes focus, and the key should still hide the overlay afterwards. Focus is read a
+// tick after the event: a blur that only moved focus into the picture's iframe leaves the window
+// focused.
 function reportLive() {
   if (!live) return;
   setTimeout(() => {

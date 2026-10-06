@@ -6,7 +6,8 @@ text. Migaku's extension does the rest: lookups, translation, and cards with the
 Frames are transient: each becomes a Migaku card (studied in Migaku) or is discarded.
 
 Works on Linux (KDE, GNOME, Sway, Hyprland, X11), macOS and Windows. Built and tested first for
-Bazzite (KDE Plasma desktop mode).
+Bazzite in **Desktop Mode** (KDE Plasma). Bazzite's Game Mode (gamescope) isn't supported: it has
+no desktop shortcuts, screenshot tool or second window to show the overlay in.
 
 | Part | Runs | What it does |
 |---|---|---|
@@ -22,14 +23,19 @@ the client, which does its job and exits.
 1. **Start the server** (Docker or podman):
 
    ```sh
-   gh repo clone chatton/migaku-games ~/migaku-games && cd ~/migaku-games
+   git clone https://github.com/chatton/migaku-games.git ~/migaku-games && cd ~/migaku-games
    docker login ghcr.io       # the image is private: your GitHub user + a token with read:packages
-   docker compose pull        # or: podman compose pull
-   docker compose up -d       # or: podman compose up -d; `--build` builds from this checkout instead
+   docker compose pull
+   docker compose up -d       # `--build` builds from this checkout instead of pulling
    ```
 
-   Open http://localhost:8765: the gallery should load. With rootless podman, also run
-   `systemctl --user enable podman-restart` so the server comes back after a reboot.
+   **Bazzite / Fedora (podman)**: Bazzite ships podman, not Docker (except the `-dx` images).
+   `podman compose` needs a compose provider: if `podman compose version` fails, install one
+   (`brew install podman-compose`). Then use `podman login ghcr.io`, `podman compose pull` and
+   `podman compose up -d`, and run `systemctl --user enable podman-restart` so the server comes
+   back after a reboot (the hotkey can start it too, but the first start is slow).
+
+   Open http://localhost:8765: the gallery should load.
 
 2. **Check this machine**: `python3 ~/migaku-games/migaku_games.py --doctor` shows the desktop it
    detected, which screenshot and window tools it will use, what's missing, whether the server
@@ -72,7 +78,9 @@ game to borderless or windowed.
      clipboard: press Ctrl+V (Cmd+V) in the card creator to put the frame on the card. Turn off
      image search in the card creator's settings to skip Migaku's stock image.
    - `?` lists every shortcut.
-3. **Press the hotkey again**: the window hides and a frozen game resumes.
+3. **Press the hotkey again**: the window hides and a frozen game resumes. (If you Alt+Tab back
+   to the game instead, the live window is still "shown": the next press hides it, and the one
+   after captures. Hiding it with the hotkey avoids that.)
 
 Where a desktop doesn't let one app raise another's window (GNOME on Wayland), the client runs
 in **follow mode**: the hotkey still captures, and the live window (kept on a second screen, or
@@ -158,7 +166,8 @@ Both logs carry timestamps with their UTC offset, so they line up.
 |---|---|
 | Pressing the hotkey does nothing | A desktop notification should say why; if not, the shortcut isn't running the command: check the path in the shortcut and the host log |
 | "frame server not reachable" | `docker compose ps` / `docker compose logs`; the client starts the stack itself, but the first start takes a while |
-| The live window never comes to the front | `--doctor` for the window backend; on KDE, the journal line above shows how many windows the script matched |
+| The live window never comes to the front | `--doctor` for the window backend; on KDE, the journal line above shows how many windows the script matched (it matches Chromium browsers' windows titled "Migaku Live") |
+| A page says 403 / "only answers to localhost" | the server refuses other host names; open it as http://localhost:8765, or add the name to `MIGAKU_ALLOWED_HOSTS` under `environment:` in `compose.yaml` |
 | Hovering does nothing | the server log says on each page load whether Migaku is active; authorise Migaku for `localhost:8765` |
 | Wrong or noisy text | the server log's OCR line shows exactly what was read |
 

@@ -98,6 +98,16 @@ class ChooseTest(unittest.TestCase):
         self.assertEqual(set(config.WINDOW_BACKENDS) - {"auto"}, set(window.NAMES))
 
 
+class KWinTest(unittest.TestCase):
+    def test_script_id_from_each_dbus_tool(self):
+        sid = window.KWin.script_id
+        self.assertEqual(sid("method return time=1.2 sender=:1.5 -> destination=:1.9 serial=812\n   int32 7\n"), 7)
+        self.assertEqual(sid("(7,)\n"), 7)
+        self.assertEqual(sid("7\n"), 7)
+        self.assertIsNone(sid("   int32 -1\n"))  # KWin couldn't load it
+        self.assertIsNone(sid(""))
+
+
 class FreezeTest(unittest.TestCase):
     PROCS = {1: (0, ["/sbin/init"]), 100: (1, ["/steam/reaper", "SteamLaunch", "AppId=39150", "--"]),
              101: (100, ["Z:\\games\\FF8_EN.exe"]), 102: (101, ["wineserver"]),

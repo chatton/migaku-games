@@ -4,7 +4,7 @@
     python3 server.py --ocr meiki --data ./data --config ./config/config.yaml
 
 The options can also come from the environment (what the container uses):
-MIGAKU_OCR, MIGAKU_HOST, MIGAKU_PORT, MIGAKU_DATA, MIGAKU_CONFIG.
+MIGAKU_OCR, MIGAKU_HOST, MIGAKU_PORT, MIGAKU_DATA, MIGAKU_CONFIG, MIGAKU_ALLOWED_HOSTS.
 
 How the app behaves (retention, game profiles, keybindings, OCR engine) is declared in the
 config file (see config.py and config/config.yaml); the web UI shows it and reloads it on
@@ -53,6 +53,10 @@ ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
 FRAME_ID = re.compile(r"^\d{8}-\d{6}(-\d{3})?$")
 MAX_UPLOAD = 50 * 1024 * 1024
+# Names this server answers to. Anything else is refused: a page on another site can't write to it
+# (Origin) or read frames through a DNS name pointed at 127.0.0.1 (Host). MIGAKU_ALLOWED_HOSTS
+# (comma-separated) adds names, e.g. for a server reached from another machine.
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
 log = logging.getLogger("server")
 
 
@@ -208,15 +212,22 @@ class Store:
         except Exception as e:
             data = {"engine": engine, "lines": [], "blocks": [], "error": str(e)}
             log.exception("ocr %s (%s) failed", frame_id, engine)
-        write_json(frame / "ocr.json", {**data, **meta})
-        self.pending.pop(frame_id).set()
+        try:
+            write_json(frame / "ocr.json", {**data, **meta})
+        except OSError as e:  # e.g. the frame was deleted while its OCR ran
+            log.warning("ocr %s: can't save the result: %s", frame_id, e)
+        finally:
+            self.pending.pop(frame_id).set()  # always, so nothing waits on it for nothing
 
     def ocr_result(self, frame_id: str) -> dict:
         frame = self.path(frame_id)
         done = self.pending.get(frame_id)
-        if done:
-            done.wait(120)
-        return json.loads((frame / "ocr.json").read_text())
+        if done and not done.wait(120):
+            return {"lines": [], "blocks": [], "error": "OCR is still running after 120s"}
+        try:
+            return json.loads((frame / "ocr.json").read_text())
+        except FileNotFoundError:
+            raise KeyError(frame_id) from None  # deleted meanwhile
 
     # --- live viewer ----------------------------------------------------------------
     def set_latest(self, frame_id) -> None:
@@ -462,9 +473,21 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({"ok": True})
         self.send_error(404)
 
+    allowed_hosts = LOCAL_HOSTS
+
     def parse_request(self):
         self.started = time.monotonic()
-        return super().parse_request()
+        if not super().parse_request():
+            return False
+        host = hostname(self.headers.get("Host", ""))
+        # Origin only matters for writes: reads are already same-origin only (no CORS headers), and
+        # extensions (Migaku taking the picture for a card) fetch frames with their own origin.
+        origin = self.headers.get("Origin") if self.command not in ("GET", "HEAD") else None
+        if host not in self.allowed_hosts or (origin and hostname(origin) not in self.allowed_hosts):
+            log.warning("refused %s %s: Host %r Origin %r", self.command, self.path[:200], self.headers.get("Host"), origin)
+            self.send_error(403, "this server only answers to localhost (MIGAKU_ALLOWED_HOSTS adds names)")
+            return False
+        return True
 
     def log_request(self, code="-", size="-") -> None:
         # API writes and errors at INFO; GETs (pages, polling, long-polls) only at DEBUG.
@@ -475,6 +498,14 @@ class Handler(SimpleHTTPRequestHandler):
 
     def log_message(self, fmt, *args) -> None:  # anything else BaseHTTPRequestHandler reports
         log.warning("http: " + fmt, *args)
+
+
+def hostname(value: str) -> str:
+    """The host part of a Host header or an Origin URL, lowercased, without the port."""
+    value = value.strip().lower().split("://", 1)[-1].split("/", 1)[0]
+    if value.startswith("["):  # [::1]:8765
+        return value.split("]", 1)[0] + "]"
+    return value.rsplit(":", 1)[0] if value.count(":") == 1 else value
 
 
 def prune_loop(store: Store) -> None:
@@ -502,6 +533,8 @@ def main() -> None:
              logging.getLevelName(logging.getLogger().level))
     store = Store(args.data.resolve(), args.ocr, args.config)
     Handler.store = store
+    extra = {h.strip().lower() for h in env("MIGAKU_ALLOWED_HOSTS", "").split(",") if h.strip()}
+    Handler.allowed_hosts = LOCAL_HOSTS | extra
     threading.Thread(target=prune_loop, args=(store,), daemon=True).start()
     server = ThreadingHTTPServer((args.host, args.port), partial(Handler, directory=str(WEB)))
     log.info("serving on http://%s:%d  ocr=%s  config=%s  retention=%gh", args.host, args.port, store.engine,

@@ -4,7 +4,9 @@ Where a desktop gives no way to raise another app's window (GNOME on Wayland, ge
 the "follow" backend does nothing: the live window just shows each new capture, and you switch
 to it yourself (or keep it on a second screen)."""
 import json
+import re
 import tempfile
+import time
 from pathlib import Path
 
 from .desktop import Desktop, which
@@ -74,13 +76,17 @@ else if (show) {
 class KWin(Backend):
     """KDE Plasma 5/6: a one-off KWin script over D-Bus (dbus-send, gdbus or qdbus6)."""
     name, desktops = "kwin", [("linux", "*", "kde")]
+    # Window classes of Chromium browsers (Brave by default; host.browser may name another), so a
+    # terminal or editor whose title mentions "Migaku Live" is never moved.
+    BROWSERS = ["brave", "chrom", "vivaldi", "edge", "opera"]
     SCRIPT = """
 const p6 = !!workspace.windowList;
 const wins = p6 ? workspace.windowList() : workspace.clientList();
 let found = 0;
 for (const w of wins) {
   if (!w.caption.includes(title)) continue;
-  if (!String(w.resourceClass).toLowerCase().includes("brave") && !String(w.resourceName).toLowerCase().includes("brave")) continue;
+  const cls = (String(w.resourceClass) + " " + String(w.resourceName)).toLowerCase();
+  if (!browsers.some((b) => cls.includes(b))) continue;
   found++;
   if (show) {
     // Onto the screen that was just captured (the active one), then fullscreen and focus.
@@ -114,17 +120,44 @@ print("migaku-games: " + (show ? "show" : "hide") + " matched " + found + " wind
             cmd = [tool, "org.kde.KWin", "/Scripting", f"org.kde.kwin.Scripting.{method}", *args]
         return run(cmd, check=False)
 
+    def call_path(self, path, method):
+        """A no-argument method on another KWin object (a loaded script's org.kde.kwin.Script)."""
+        tool = self.dbus_tool()
+        if tool == "dbus-send":
+            cmd = ["dbus-send", "--session", "--print-reply", "--dest=org.kde.KWin", path, f"org.kde.kwin.Script.{method}"]
+        elif tool == "gdbus":
+            cmd = ["gdbus", "call", "--session", "--dest", "org.kde.KWin", "--object-path", path,
+                   "--method", f"org.kde.kwin.Script.{method}"]
+        else:
+            cmd = [tool, "org.kde.KWin", path, f"org.kde.kwin.Script.{method}"]
+        return run(cmd, check=False)
+
+    @staticmethod
+    def script_id(output: str):
+        """loadScript's reply: 'int32 3' (dbus-send), '(3,)' (gdbus) or '3' (qdbus); -1 is a failure."""
+        found = re.findall(r"-?\d+", output.strip().splitlines()[-1] if output.strip() else "")
+        return int(found[-1]) if found and int(found[-1]) >= 0 else None
+
     def _run(self, show):
         with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
-            f.write(script_vars(title=LIVE_TITLE, show=show) + self.SCRIPT)
+            f.write(script_vars(title=LIVE_TITLE, show=show, browsers=self.BROWSERS) + self.SCRIPT)
         try:
             self.call("unloadScript", "migaku-live")  # in case an earlier run left it loaded
             loaded = self.call("loadScript", f.name, "migaku-live")
             if loaded.returncode:
                 raise AppError(f"KWin scripting failed: {loaded.stderr.strip()[:200]}")
-            started = self.call("start")
-            if started.returncode:
-                raise AppError(f"KWin script didn't start: {started.stderr.strip()[:200]}")
+            # KWin reads the script file in the background, so it mustn't be unloaded (or the file
+            # deleted) until it has run. The script's own run() replies only once it has (Plasma 6:
+            # /Scripting/Script<id>, Plasma 5: /<id>); Scripting.start() returns at once.
+            sid = self.script_id(loaded.stdout)
+            ran = sid is not None and any(self.call_path(path, "run").returncode == 0
+                                          for path in (f"/Scripting/Script{sid}", f"/{sid}"))
+            if not ran:
+                log.info("window: couldn't run KWin script %s directly; starting all loaded scripts", sid)
+                started = self.call("start")
+                if started.returncode:
+                    raise AppError(f"KWin script didn't start: {started.stderr.strip()[:200]}")
+                time.sleep(0.3)  # let KWin load and run it before it's unloaded
             self.call("unloadScript", "migaku-live")
             log.info("window: KWin script ran (its match count is in the KWin log: journalctl --user -b | grep migaku-games)")
         finally:
