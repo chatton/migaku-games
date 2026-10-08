@@ -122,9 +122,12 @@ tools/native.sh status        # venv, JMdict, service, and whether the server an
    to the game instead, the live window is still "shown": the next press hides it, and the one
    after captures. Hiding it with the hotkey avoids that.)
 
-Where a desktop doesn't let one app raise another's window (GNOME on Wayland), the client runs
-in **follow mode**: the hotkey still captures, and the live window (kept on a second screen, or
-one Alt+Tab away) shows the new frame; a notification says it's ready.
+On GNOME the hotkey raises and maximises the live window through the
+[Window Calls](https://extensions.gnome.org/extension/4724/window-calls/) extension, and the next
+press minimises it again. Without that extension (GNOME on Wayland doesn't let one app raise
+another's window), the client runs in **follow mode**: the hotkey still captures, and the live
+window (kept on a second screen, or one Alt+Tab away) shows the new frame; a notification says
+it's ready.
 
 Other ways in: `python3 migaku_games.py` (drag-select a region, opens a tab), `--full`,
 `--image x.png`, or drop/paste an image on the gallery page.
@@ -154,7 +157,7 @@ profiles:
     process: ""              # what to freeze; empty = the running Steam game (Linux)
 host:                        # the hotkey client on this machine
   capture: auto              # or spectacle, portal, gnome-screenshot, grim, maim, scrot, import, screencapture, windows
-  window: auto               # or kwin, sway, hyprland, xdotool, jxa, windows, follow
+  window: auto               # or kwin, gnome, sway, hyprland, xdotool, jxa, windows, follow
   browser: ""                # e.g. "flatpak run com.brave.Browser"; empty finds Brave
   notifications: true        # progress notifications; errors are always shown
 keybindings:                 # viewer shortcuts; unlisted ones keep their defaults

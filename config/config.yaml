@@ -29,7 +29,7 @@ profiles:
   ff8:
     name: Final Fantasy VIII
     # Experimental (Linux): pause the game's processes while the overlay is up.
-    freeze: false
+    freeze: true
     # Which process to freeze. Empty: the running Steam game. Otherwise part of the executable's
     # name, e.g. duckstation, retroarch.
     process: ""

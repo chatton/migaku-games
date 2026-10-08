@@ -3,6 +3,7 @@
 Runs anywhere; CI also runs it on several Linux distributions (Fedora, Ubuntu, Debian, Arch,
 Alpine) with and without desktop tools installed.
 """
+import json
 import os
 import subprocess
 import sys
@@ -48,6 +49,26 @@ class DetectTest(unittest.TestCase):
         self.assertEqual(env, {"XDG_SESSION_TYPE": "wayland"})
 
 
+class GnomeWindowTest(unittest.TestCase):
+    LIST = json.dumps([{"id": 7, "title": "Migaku Live", "wm_class": "brave-browser"},
+                       {"id": 8, "title": "Migaku Live notes - Terminal", "wm_class": "org.gnome.Ptyxis"},
+                       {"id": 9, "title": "FINAL FANTASY VIII", "wm_class": "steam_app_39150"}])
+
+    def test_show_raises_only_browser_live_windows(self):
+        calls = []
+
+        def fake_run(cmd, **_):
+            calls.append(cmd[cmd.index("--method") + 1].rsplit(".", 1)[1:] + cmd[cmd.index("--method") + 2:])
+            out = repr((self.LIST,)) if cmd[cmd.index("--method") + 1].endswith(".List") else "()"
+            return subprocess.CompletedProcess(cmd, 0, out, "")
+
+        with mock.patch.object(window, "run", fake_run):
+            window.Gnome().show()
+            window.Gnome().hide()
+        self.assertEqual(calls, [["List"], ["Unminimize", "7"], ["Maximize", "7"], ["Activate", "7"],
+                                 ["List"], ["Minimize", "7"]])
+
+
 class ChooseTest(unittest.TestCase):
     def choose(self, env, tools, which_kind, preferred="auto"):
         patches = having(*tools)
@@ -87,6 +108,10 @@ class ChooseTest(unittest.TestCase):
         self.assertEqual(self.choose(KDE_WAYLAND, ["gdbus"], "window"), "kwin")
         self.assertEqual(self.choose(KDE_WAYLAND, [], "window"), "follow")
         self.assertEqual(self.choose(GNOME_WAYLAND, ["dbus-send"], "window"), "follow")
+        with mock.patch.object(window, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, window.Gnome.IFACE, "")):
+            self.assertEqual(self.choose(GNOME_WAYLAND, ["gdbus"], "window"), "gnome")
+        with mock.patch.object(window, "run", lambda *a, **k: subprocess.CompletedProcess(a, 1, "", "no such object")):
+            self.assertEqual(self.choose(GNOME_WAYLAND, ["gdbus"], "window"), "follow")
         self.assertEqual(self.choose(SWAY, ["swaymsg"], "window"), "sway")
         self.assertEqual(self.choose(X11_XFCE, ["xdotool"], "window"), "xdotool")
 

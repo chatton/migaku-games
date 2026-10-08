@@ -29,7 +29,7 @@ MIGAKU_KEYS = {"e", "q", "1", "2", "3", "4", "u", "k", "i"}
 ENGINES = ("vision", "meiki")
 # Host-side backends (migaku_host/capture.py and window.py; tests/test_host.py keeps these in sync).
 CAPTURE_BACKENDS = ("auto", "screencapture", "windows", "spectacle", "portal", "gnome-screenshot", "grim", "maim", "scrot", "import")
-WINDOW_BACKENDS = ("auto", "jxa", "windows", "kwin", "sway", "hyprland", "xdotool", "follow")
+WINDOW_BACKENDS = ("auto", "jxa", "windows", "kwin", "gnome", "sway", "hyprland", "xdotool", "follow")
 PROFILE_ID = re.compile(r"^[\w-]{1,40}$")
 
 

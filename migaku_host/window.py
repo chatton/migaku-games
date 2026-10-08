@@ -3,6 +3,7 @@
 Where a desktop gives no way to raise another app's window (GNOME on Wayland, generic Wayland),
 the "follow" backend does nothing: the live window just shows each new capture, and you switch
 to it yourself (or keep it on a second screen)."""
+import ast
 import json
 import re
 import tempfile
@@ -242,6 +243,48 @@ class Windows(Backend):
             user32.ShowWindow(h, 6)  # SW_MINIMIZE
 
 
+class Gnome(Backend):
+    """GNOME (Wayland or X11) through the Window Calls shell extension
+    (https://extensions.gnome.org/extension/4724/window-calls/), the only way another app can raise
+    a window on GNOME Wayland. Without the extension this falls back to follow mode."""
+    name, needs, desktops = "gnome", ("gdbus",), [("linux", "*", "gnome")]
+    PATH, IFACE = "/org/gnome/Shell/Extensions/Windows", "org.gnome.Shell.Extensions.Windows"
+
+    def missing(self):
+        if not which("gdbus"):
+            return ["gdbus"]
+        probe = run(["gdbus", "introspect", "--session", "--dest", "org.gnome.Shell", "--object-path", self.PATH],
+                    check=False, timeout=5)
+        return [] if self.IFACE in probe.stdout else ["the Window Calls GNOME extension (window-calls@domandoman.xyz)"]
+
+    def call(self, method, *args):
+        return run(["gdbus", "call", "--session", "--dest", "org.gnome.Shell", "--object-path", self.PATH,
+                    "--method", f"{self.IFACE}.{method}", *[str(a) for a in args]], timeout=5)
+
+    def live_windows(self) -> list:
+        """IDs of browser windows titled "Migaku Live" (a terminal mentioning it is never moved)."""
+        # gdbus prints a GVariant tuple holding one JSON string: ('[{...}]',)
+        windows = json.loads(ast.literal_eval(self.call("List").stdout.strip())[0])
+        ids = [w["id"] for w in windows if LIVE_TITLE in (w.get("title") or "")
+               and any(b in (w.get("wm_class") or "").lower() for b in KWin.BROWSERS)]
+        log.info("window: %d live window(s): %s", len(ids), ids)
+        return ids
+
+    def show(self):
+        ids = self.live_windows()
+        if not ids:
+            raise AppError("no Migaku Live window to raise")
+        for wid in ids:
+            self.call("Unminimize", wid)
+            self.call("Maximize", wid)
+            self.call("Activate", wid)
+
+    def hide(self):
+        # Minimising hands focus back to the window underneath: the game.
+        for wid in self.live_windows():
+            self.call("Minimize", wid)
+
+
 class Follow(Backend):
     """No window control: the live window follows new captures; switch to it yourself."""
     name, desktops, can_raise = "follow", [("*", "*", "*")], False
@@ -253,7 +296,7 @@ class Follow(Backend):
         log.info("window: follow mode, nothing to hide")
 
 
-BACKENDS = [MacJXA(), Windows(), KWin(), Sway(), Hyprland(), Xdotool(), Follow()]
+BACKENDS = [MacJXA(), Windows(), KWin(), Gnome(), Sway(), Hyprland(), Xdotool(), Follow()]
 NAMES = [b.name for b in BACKENDS]
 
 
@@ -273,6 +316,6 @@ def choose(d: Desktop, preferred: str = "auto") -> Backend:
 
 def describe_unsupported(d: Desktop) -> str:
     if d.os == "linux" and d.session == "wayland" and d.desktop == "gnome":
-        return "GNOME on Wayland doesn't let other apps raise windows"
+        return "GNOME on Wayland doesn't let other apps raise windows; install the Window Calls extension"
     return ""
 
