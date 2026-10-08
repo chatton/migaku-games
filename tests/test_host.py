@@ -30,7 +30,7 @@ def having(*tools):
     """Patch `which` in every host module so only these tools exist."""
     fake = lambda name: f"/usr/bin/{name}" if name in tools else None
     return mock.patch.multiple("migaku_host.desktop", which=fake), mock.patch.object(capture, "which", fake), \
-        mock.patch.object(window, "which", fake)
+        mock.patch.object(window, "which", fake), mock.patch.object(capture, "_gi_available", lambda: "gi" in tools)
 
 
 class DetectTest(unittest.TestCase):
@@ -63,6 +63,8 @@ class ChooseTest(unittest.TestCase):
     def test_capture_per_desktop(self):
         self.assertEqual(self.choose(KDE_WAYLAND, ["spectacle", "grim"], "capture"), "spectacle")
         self.assertEqual(self.choose(GNOME_WAYLAND, ["gnome-screenshot"], "capture"), "gnome-screenshot")
+        self.assertEqual(self.choose(GNOME_WAYLAND, ["gi", "gnome-screenshot"], "capture"), "portal")
+        self.assertEqual(self.choose(X11_XFCE, ["gi", "scrot"], "capture"), "scrot")
         self.assertEqual(self.choose(SWAY, ["grim"], "capture"), "grim")
         self.assertEqual(self.choose(X11_XFCE, ["scrot"], "capture"), "scrot")
 

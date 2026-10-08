@@ -52,7 +52,7 @@ Then do steps 3 to 5 below (Brave + Migaku, the hotkey, your game profile). The 
 2. **Check this machine**: `python3 ~/migaku-games/migaku_games.py --doctor` shows the desktop it
    detected, which screenshot and window tools it will use, what's missing, whether the server
    answers, and where the logs are. Install anything it lists as missing for your desktop (e.g.
-   `spectacle` on KDE, `gnome-screenshot` on GNOME, `grim` on Sway/Hyprland, `scrot` or `maim` on X11).
+   `spectacle` on KDE, PyGObject (`python3-gobject`) on GNOME Wayland for the screenshot portal (`gnome-screenshot` elsewhere), `grim` on Sway/Hyprland, `scrot` or `maim` on X11).
 
 3. **Brave + Migaku**: install the Migaku extension and log in. Then run
    `python3 ~/migaku-games/migaku_games.py --overlay` once **from a terminal**: it opens the
@@ -153,7 +153,7 @@ profiles:
     freeze: false            # experimental: pause the game while the overlay is up
     process: ""              # what to freeze; empty = the running Steam game (Linux)
 host:                        # the hotkey client on this machine
-  capture: auto              # or spectacle, gnome-screenshot, grim, maim, scrot, import, screencapture, windows
+  capture: auto              # or spectacle, portal, gnome-screenshot, grim, maim, scrot, import, screencapture, windows
   window: auto               # or kwin, sway, hyprland, xdotool, jxa, windows, follow
   browser: ""                # e.g. "flatpak run com.brave.Browser"; empty finds Brave
   notifications: true        # progress notifications; errors are always shown

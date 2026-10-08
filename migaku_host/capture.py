@@ -2,7 +2,11 @@
 "full" (all monitors) and "region" (drag-select). Each backend says which desktops it suits and
 which programs it needs; choose() picks the first that fits, or the one named in the config."""
 import json
+import os
+import shutil
 import sys
+import time
+import urllib.parse
 from pathlib import Path
 
 from .desktop import Desktop, which
@@ -63,6 +67,76 @@ class Spectacle(Backend):
         run(["spectacle", "-b", "-n", {"screen": "-m", "full": "-f", "region": "-r"}[mode], "-o", dest], timeout=120)
 
 
+def _gi_available() -> bool:
+    try:
+        import gi  # noqa: F401  (PyGObject: python3-gobject on Fedora, python3-gi on Debian/Ubuntu)
+    except ImportError:
+        return False
+    return True
+
+
+def _portal_screenshot(interactive: bool, timeout: int) -> str:
+    """Ask xdg-desktop-portal for a screenshot and wait for its answer; returns the file URI. The
+    answer is a signal sent only to the requesting connection, so this needs PyGObject rather than
+    the gdbus CLI."""
+    import gi
+    gi.require_version("Gio", "2.0")
+    from gi.repository import Gio, GLib
+
+    result = {}
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        token = f"migaku{os.getpid()}"
+        sender = bus.get_unique_name()[1:].replace(".", "_")
+        handle = f"/org/freedesktop/portal/desktop/request/{sender}/{token}"
+        loop = GLib.MainLoop()
+
+        def on_response(_conn, _sender, _path, _iface, _signal, params):
+            result["code"], result["results"] = params.unpack()
+            loop.quit()
+
+        sub = bus.signal_subscribe("org.freedesktop.portal.Desktop", "org.freedesktop.portal.Request", "Response",
+                                   handle, None, Gio.DBusSignalFlags.NONE, on_response)
+        try:
+            options = {"handle_token": GLib.Variant("s", token), "interactive": GLib.Variant("b", interactive)}
+            bus.call_sync("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
+                          "org.freedesktop.portal.Screenshot", "Screenshot", GLib.Variant("(sa{sv})", ("", options)),
+                          GLib.VariantType("(o)"), Gio.DBusCallFlags.NONE, -1, None)
+            GLib.timeout_add_seconds(timeout, loop.quit)
+            loop.run()
+        finally:
+            bus.signal_unsubscribe(sub)
+    except GLib.Error as e:
+        raise AppError(f"screenshot portal failed: {e.message}") from None
+    if "code" not in result:
+        raise AppError(f"screenshot portal gave no answer within {timeout}s")
+    if result["code"] == 1:
+        raise AppError("capture cancelled")
+    if result["code"] != 0 or not result["results"].get("uri"):
+        raise AppError('screenshot portal refused the capture; allow captures without a prompt with: '
+                       'flatpak permission-set screenshot screenshot "" yes')
+    return result["results"]["uri"]
+
+
+class Portal(Backend):
+    """xdg-desktop-portal's Screenshot. Recent GNOME on Wayland only lets its own tools capture the
+    screen directly, so gnome-screenshot hangs there; the portal works. A non-interactive capture
+    needs the saved permission (`flatpak permission-set screenshot screenshot "" yes`), or GNOME
+    refuses it; "region" opens GNOME's screenshot UI to pick the area."""
+    name, desktops = "portal", [("linux", "wayland", "gnome")]
+
+    def missing(self):
+        return [] if _gi_available() else ["python3-gobject"]
+
+    def capture(self, dest, mode):
+        start = time.monotonic()
+        uri = _portal_screenshot(interactive=(mode == "region"), timeout=120 if mode == "region" else 30)
+        src = Path(urllib.parse.unquote(urllib.parse.urlparse(uri).path))
+        log.info("portal: %s (%d ms)", src, (time.monotonic() - start) * 1000)
+        # The portal saves into ~/Pictures; move it so captures don't pile up there.
+        shutil.move(str(src), str(dest))
+
+
 class GnomeScreenshot(Backend):
     name, needs, desktops = "gnome-screenshot", ("gnome-screenshot",), [("linux", "*", "gnome")]
 
@@ -121,7 +195,7 @@ class ImageMagickImport(Backend):
         run(["import", *([] if mode == "region" else ["-window", "root"]), dest], timeout=120)
 
 
-BACKENDS = [MacScreencapture(), WindowsPowerShell(), Spectacle(), GnomeScreenshot(), Grim(), Maim(), Scrot(),
+BACKENDS = [MacScreencapture(), WindowsPowerShell(), Spectacle(), Portal(), GnomeScreenshot(), Grim(), Maim(), Scrot(),
             ImageMagickImport()]
 NAMES = [b.name for b in BACKENDS]
 
@@ -140,7 +214,7 @@ def choose(d: Desktop, preferred: str = "auto") -> Backend:
     for b in fitting + [b for b in BACKENDS if b not in fitting]:
         if not b.missing():
             return b
-    hint = {"kde": "spectacle", "gnome": "gnome-screenshot", "sway": "grim", "hyprland": "grim"}.get(d.desktop, "maim or scrot")
+    hint = {"kde": "spectacle", "gnome": "python3-gobject (portal) or gnome-screenshot", "sway": "grim", "hyprland": "grim"}.get(d.desktop, "maim or scrot")
     raise AppError(f"no screenshot tool found for {d.desktop}/{d.session}; install {hint}")
 
 
