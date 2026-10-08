@@ -87,6 +87,33 @@ def game_process(pattern: str, procs: dict):
     return None
 
 
+def _environ(pid: int) -> dict:
+    try:
+        raw = open(f"/proc/{pid}/environ", "rb").read().decode(errors="replace")
+    except OSError:
+        return {}
+    return dict(item.split("=", 1) for item in raw.split("\0") if "=" in item)
+
+
+def steam_app_id(argv: list):
+    """The AppId=N argument Steam gives `reaper` for the game it launches."""
+    return next((a.split("=", 1)[1] for a in argv if a.startswith("AppId=")), None)
+
+
+def steam_game_tree(root: int, procs: dict, environ=_environ) -> list:
+    """The reaper's own tree plus every process carrying the game's SteamAppId. Flatpak Steam
+    starts the game's container through flatpak-portal, outside the reaper's tree, so the game
+    itself is only found by that variable."""
+    tree = process_tree(root, procs)
+    app_id = steam_app_id(procs[root][1])
+    if app_id:
+        mine = {os.getpid(), os.getppid()}
+        for pid in procs:
+            if pid not in tree and pid not in mine and environ(pid).get("SteamAppId") == app_id:
+                tree += [p for p in process_tree(pid, procs) if p not in tree]
+    return tree
+
+
 def process_tree(root: int, procs: dict) -> list:
     children = {}
     for pid, (ppid, _) in procs.items():
@@ -133,7 +160,7 @@ def freeze_game(profile: dict) -> None:
     if not root:
         what = f"no running process matches {pattern!r}" if pattern else "no running Steam game found"
         raise AppError(f"freezing {profile.get('name')}: {what}")
-    tree = process_tree(root, procs)
+    tree = steam_game_tree(root, procs) if not pattern else process_tree(root, procs)
     log.info("freeze: %s root %d %s, %d processes: %s", profile.get("name"), root, procs[root][1][:3], len(tree), tree)
     frozen_file().write_text(json.dumps(tree))  # recorded first, so it can always be undone
     _signal_all(tree, suspend=True)

@@ -156,6 +156,16 @@ class FreezeTest(unittest.TestCase):
         self.assertEqual(freeze.game_process("", self.PROCS), 100)
         self.assertEqual(sorted(freeze.process_tree(100, self.PROCS)), [100, 101, 102])
 
+    def test_flatpak_steam_game_outside_the_reaper_tree(self):
+        # Flatpak Steam: reaper 100 (its tree 100-102), the game's container 500 started by
+        # flatpak-portal 400 with its child 501, and an unrelated Steam process 600.
+        procs = dict(self.PROCS)
+        procs.update({400: (1, ["flatpak-portal"]), 500: (400, ["bwrap", "--", "pv-adverb"]),
+                      501: (500, ["Z:\\games\\FF8_EN.exe"]), 600: (1, ["steamwebhelper"])})
+        env = {500: {"SteamAppId": "39150"}, 501: {"SteamAppId": "39150"}, 600: {"SteamAppId": "730"}}
+        tree = freeze.steam_game_tree(100, procs, environ=lambda pid: env.get(pid, {}))
+        self.assertEqual(sorted(tree), [100, 101, 102, 500, 501])
+
     def test_pattern_matches_executable_name_only(self):
         self.assertEqual(freeze.game_process("DuckStation", self.PROCS), 200)
         self.assertEqual(freeze.game_process("ff8_en", self.PROCS), 101)  # Wine path with backslashes
