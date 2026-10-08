@@ -114,6 +114,26 @@ def steam_game_tree(root: int, procs: dict, environ=_environ) -> list:
     return tree
 
 
+# Steam's own runtimes, which live under steamapps/common like the games do.
+_STEAM_RUNTIMES = ("proton", "steamlinuxruntime", "steamworks")
+
+
+def game_executables(tree: list, procs: dict) -> list:
+    """The game's own processes within a Steam launch: executables under steamapps/common/<game>.
+    Wine's services and steam.exe (Steam's stand-in, which the Steam client talks to), Proton and
+    the runtime container stay running, or the Steam client hangs while the game is frozen.
+    Falls back to the whole tree if nothing matches."""
+    games = []
+    for pid in tree:
+        exe = procs[pid][1][0] if procs[pid][1] else ""
+        parts = [p.lower() for p in re.split(r"[/\\]", exe)]
+        if "common" in parts and parts.index("common") > 0 and parts[parts.index("common") - 1] == "steamapps":
+            title = parts[parts.index("common") + 1] if len(parts) > parts.index("common") + 1 else ""
+            if title and not title.startswith(_STEAM_RUNTIMES):
+                games.append(pid)
+    return games or tree
+
+
 def process_tree(root: int, procs: dict) -> list:
     children = {}
     for pid, (ppid, _) in procs.items():
@@ -160,7 +180,7 @@ def freeze_game(profile: dict) -> None:
     if not root:
         what = f"no running process matches {pattern!r}" if pattern else "no running Steam game found"
         raise AppError(f"freezing {profile.get('name')}: {what}")
-    tree = steam_game_tree(root, procs) if not pattern else process_tree(root, procs)
+    tree = game_executables(steam_game_tree(root, procs), procs) if not pattern else process_tree(root, procs)
     log.info("freeze: %s root %d %s, %d processes: %s", profile.get("name"), root, procs[root][1][:3], len(tree), tree)
     frozen_file().write_text(json.dumps(tree))  # recorded first, so it can always be undone
     _signal_all(tree, suspend=True)

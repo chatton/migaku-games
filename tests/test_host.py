@@ -166,6 +166,22 @@ class FreezeTest(unittest.TestCase):
         tree = freeze.steam_game_tree(100, procs, environ=lambda pid: env.get(pid, {}))
         self.assertEqual(sorted(tree), [100, 101, 102, 500, 501])
 
+    def test_proton_freezes_only_the_game_executables(self):
+        procs = {10: (1, ["/steam/ubuntu12_32/reaper", "SteamLaunch", "AppId=1026680"]),
+                 11: (10, ["/steam/steamapps/common/SteamLinuxRuntime_sniper/pv-adverb"]),
+                 12: (11, ["python3", "/steam/steamapps/common/Proton - Experimental/proton"]),
+                 13: (12, ["/steam/steamapps/common/Proton - Experimental/files/bin/wineserver"]),
+                 14: (12, ["c:\\windows\\system32\\steam.exe"]),
+                 15: (14, ["C:\\windows\\system32\\services.exe"]),
+                 16: (14, ["S:\\steamapps\\common\\FINAL FANTASY VIII Remastered\\FFVIII_LAUNCHER.exe"]),
+                 17: (16, ["S:\\steamapps\\common\\FINAL FANTASY VIII Remastered\\FFVIII.exe", "jp"])}
+        tree = freeze.process_tree(10, procs)
+        self.assertEqual(sorted(freeze.game_executables(tree, procs)), [16, 17])
+        native = {20: (1, ["/steam/reaper", "SteamLaunch", "AppId=1"]), 21: (20, ["/steam/steamapps/common/Game/game.x86_64"])}
+        self.assertEqual(freeze.game_executables(freeze.process_tree(20, native), native), [21])
+        unknown = {30: (1, ["/steam/reaper", "SteamLaunch", "AppId=2"]), 31: (30, ["/opt/elsewhere/game"])}
+        self.assertEqual(sorted(freeze.game_executables(freeze.process_tree(30, unknown), unknown)), [30, 31])
+
     def test_pattern_matches_executable_name_only(self):
         self.assertEqual(freeze.game_process("DuckStation", self.PROCS), 200)
         self.assertEqual(freeze.game_process("ff8_en", self.PROCS), 101)  # Wine path with backslashes
