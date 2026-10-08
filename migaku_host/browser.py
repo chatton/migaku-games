@@ -34,7 +34,9 @@ def open_url(d: Desktop, url: str, app: bool, configured: str = "") -> None:
     if d.os == "mac" and not configured and not app:
         run(["open", "-a", MAC_APP, url])
         return
-    cmd = browser_command(d, configured) + ([f"--app={url}"] if app else [url])
+    # App windows (the live overlay) start maximised: GNOME on Wayland gives no other way to size
+    # them. Chromium applies it only when it starts a new browser process.
+    cmd = browser_command(d, configured) + (["--start-maximized", f"--app={url}"] if app else [url])
     log.info("browser: %s", cmd)
     try:
         # Detached, so the browser outlives this command.
