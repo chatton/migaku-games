@@ -70,7 +70,13 @@ class Session:
 
 def overlay(s: Session, engine, game) -> None:
     """The hotkey: hide the overlay if it's shown, else capture the screen and show it."""
+    was_frozen = freeze.frozen_file().exists()
     freeze.resume()  # a game left frozen (overlay closed some other way) comes back first
+    if was_frozen and not s.window.can_raise:
+        # Follow mode can't tell whether the overlay is up, so a press that finds the game
+        # paused by the last one is the "back to the game" press: resume only.
+        log.info("follow mode: the game was paused, so this press only resumes it")
+        return
     state = request(s.server, "/api/live", timeout=2)
     log.info("live window: %s", state)
     if state.get("shown"):
