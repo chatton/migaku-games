@@ -101,7 +101,13 @@
   #help p { margin: 12px 0 0; color: var(--muted); font-size: 12px; }
   /* Live mode (?live): one long-lived window over the game. The picture fills the window so it
      lines up with the game underneath; the toolbar slides up when the mouse nears the bottom. */
-  body.live #bar { position: fixed; left: 0; right: 0; bottom: 0; transform: translateY(100%); transition: transform .15s; z-index: 4; }
+  body.live #bar { position: fixed; left: 0; right: 0; bottom: 0; transform: translateY(100%); z-index: 4;
+    padding: 10px 14px; gap: 10px; font-size: 15px; }
+  /* Live mode: larger toolbar controls, easy to hit over a fullscreen game. */
+  body.live .tb { height: 44px; min-width: 44px; padding: 0 10px; border-radius: 9px; }
+  body.live .tb svg { width: 24px; height: 24px; }
+  body.live .seg .tb { height: 38px; min-width: 38px; }
+  body.live .seg .tb svg { width: 20px; height: 20px; }
   body.live.peek #bar, body.live.peek-hold #bar { transform: none; }
   /* A red frame round the live window, so the frozen picture is never mistaken for the game. */
   body.live::after { content: ""; position: fixed; inset: 0; border: 4px solid #e5322d; pointer-events: none; z-index: 10; }
@@ -243,6 +249,13 @@ function layout() {
 let captionScale = 1;
 try { captionScale = Number(localStorage.getItem("captionScale")) || 1; } catch {}
 
+// Height of the live toolbar, measured where it overlaps the picture (it sits off-screen until
+// shown, so use its own height).
+function stageBottomReserve() {
+  const o = stage.getBoundingClientRect();
+  return Math.max(0, $("bar").offsetHeight - (innerHeight - o.bottom));
+}
+
 function placeControls(block, origin, W) {
   const H = origin.height;
   const rects = [...block.querySelectorAll(".line")].map((el) => el.getBoundingClientRect());
@@ -264,9 +277,12 @@ function placeControls(block, origin, W) {
     return;
   }
   // Default: under the dialogue, or above it when there's no room (boxes sit low on screen).
+  // In live mode the toolbar slides over the bottom of the window, so keep clear of it.
+  const floor = H - (live ? stageBottomReserve() : 0);
   cap.style.left = Math.min(left, W - cap.offsetWidth - 8) + "px";
   const below = bottom + 6, above = top - 6 - cap.offsetHeight;
-  cap.style.top = (below + cap.offsetHeight <= H || above < 0 ? below : above) + "px";
+  const y = below + cap.offsetHeight <= floor || above < 0 ? below : above;
+  cap.style.top = Math.max(0, Math.min(y, floor - cap.offsetHeight)) + "px";
 }
 
 // Drag a caption anywhere; double-click puts it back in its default place.
@@ -760,7 +776,9 @@ if (live) {
   for (const ev of ["focus", "blur"]) addEventListener(ev, reportLive);
   document.addEventListener("visibilitychange", reportLive);
   addEventListener("pagehide", () => navigator.sendBeacon("/api/back"));
-  addEventListener("mousemove", (e) => document.body.classList.toggle("peek", e.clientY > innerHeight - 70 || !$("help").hidden));
+  // Shown at once while the mouse is near the bottom edge (or over the toolbar itself).
+  addEventListener("mousemove", (e) => document.body.classList.toggle("peek",
+    e.clientY > innerHeight - 90 || !!e.target.closest?.("#bar") || !$("help").hidden));
   follow();
 } else if (frame) {
   show(frame);
