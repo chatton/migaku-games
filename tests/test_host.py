@@ -70,7 +70,8 @@ class GnomeWindowTest(unittest.TestCase):
 
     def test_show_raises_only_browser_live_windows(self):
         self.assertEqual(self.run_gnome(False), [["List"], ["Unminimize", "7"], ["Details", "7"], ["Maximize", "7"],
-                                                 ["Activate", "7"], ["List"], ["Minimize", "7"]])
+                                                 ["MakeAbove", "7"], ["Activate", "7"],
+                                                 ["List"], ["UnmakeAbove", "7"], ["Minimize", "7"]])
 
     def test_show_keeps_a_fullscreen_overlay_fullscreen(self):
         self.assertNotIn(["Maximize", "7"], self.run_gnome(True))

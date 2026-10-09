@@ -279,11 +279,15 @@ class Gnome(Backend):
             details = json.loads(ast.literal_eval(self.call("Details", wid).stdout.strip())[0])
             if not details.get("fullscreen"):  # the overlay's own instance starts fullscreen
                 self.call("Maximize", wid)
+            # Window Calls activates with timestamp 0, which GNOME may treat as focus stealing and
+            # leave behind a fullscreen game; keeping it above while shown puts it on top anyway.
+            self.call("MakeAbove", wid)
             self.call("Activate", wid)
 
     def hide(self):
         # Minimising hands focus back to the window underneath: the game.
         for wid in self.live_windows():
+            self.call("UnmakeAbove", wid)
             self.call("Minimize", wid)
 
 
