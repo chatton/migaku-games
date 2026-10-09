@@ -32,6 +32,10 @@ class Backend:
     def missing(self) -> list:
         return [n for n in self.needs if not which(n)]
 
+    def has_live(self):
+        """Whether a live window exists, if this backend can tell (None: unknown, ask the server)."""
+        return None
+
     def note_focus(self) -> None:
         """Called before the capture, while the game still has focus (the screenshot portal takes
         it briefly); backends that return to the game afterwards remember it here."""
@@ -301,6 +305,9 @@ class Gnome(Backend):
 
     def activate(self, wid) -> None:
         self.call(self.ACTIVATE, "activateById", wid)
+
+    def has_live(self):
+        return any(self.is_live(w) for w in self.windows())
 
     def note_focus(self):
         focused = next((w for w in self.windows() if w.get("focus") and not self.is_live(w)), None)

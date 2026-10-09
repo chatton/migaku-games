@@ -78,6 +78,14 @@ class GnomeWindowTest(unittest.TestCase):
         methods = {c[0] for c in self.run_gnome(self.LIST, "note_focus", "show", "hide")}
         self.assertFalse(methods & {"Minimize", "Unminimize", "Maximize", "MakeAbove", "UnmakeAbove"})
 
+    def test_has_live_reads_the_desktop(self):
+        with mock.patch.object(window.Gnome, "windows", lambda self: self_list):
+            self_list = self.LIST
+            self.assertTrue(window.Gnome().has_live())
+            self_list = [w for w in self.LIST if w["id"] != 7]
+            self.assertFalse(window.Gnome().has_live())
+        self.assertIsNone(window.Follow().has_live())
+
     def test_hide_without_a_recorded_game_leaves_focus_alone(self):
         self.assertEqual(self.run_gnome(self.LIST, "hide"), [])
 

@@ -120,7 +120,10 @@ def overlay(s: Session, engine, game) -> None:
                 with step(f"show window ({s.window.name})"):
                     s.window.show()
 
-            opened = not state.get("open")
+            # Reuse the live window whenever one exists: ask the desktop where it can tell, as the
+            # server's view lapses after a restart or a quiet spell.
+            exists = s.window.has_live()
+            opened = not (state.get("open") if exists is None else exists)
             if opened:
                 open_live()
             for attempt in range(20):
