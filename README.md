@@ -122,9 +122,11 @@ tools/native.sh status        # venv, JMdict, service, and whether the server an
    to the game instead, the live window is still "shown": the next press hides it, and the one
    after captures. Hiding it with the hotkey avoids that.)
 
-On GNOME the hotkey raises the live window through the
-[Window Calls](https://extensions.gnome.org/extension/4724/window-calls/) extension, and the next
-press minimises it again. GNOME can't make another app's window fullscreen, so there the live
+On GNOME the hotkey focuses the live window through two shell extensions,
+[Window Calls](https://extensions.gnome.org/extension/4724/window-calls/) (to list windows) and
+[Activate Window By Title](https://extensions.gnome.org/extension/5021/activate-window-by-title/)
+(to focus one), and the next press focuses the game again. It never minimises or restacks the
+fullscreen overlay: doing that from an extension once deadlocked GNOME Shell. GNOME can't make another app's window fullscreen, so there the live
 window runs in its own Brave instance (profile in `~/.local/state/migaku-games/overlay-browser`)
 that starts fullscreen over the game; log into Migaku once in that window (`host.overlay_profile`).
 The live window's **Back to game** button (or `g`), and closing the window, hide it and resume a

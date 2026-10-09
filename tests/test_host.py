@@ -50,31 +50,35 @@ class DetectTest(unittest.TestCase):
 
 
 class GnomeWindowTest(unittest.TestCase):
-    LIST = json.dumps([{"id": 7, "title": "Migaku Live", "wm_class": "brave-browser"},
-                       {"id": 8, "title": "Migaku Live notes - Terminal", "wm_class": "org.gnome.Ptyxis"},
-                       {"id": 9, "title": "FINAL FANTASY VIII", "wm_class": "steam_app_39150"}])
+    LIST = [{"id": 7, "title": "Migaku Live", "wm_class": "brave-localhost__viewer.html-Default"},
+            {"id": 8, "title": "Migaku Live notes - Terminal", "wm_class": "org.gnome.Ptyxis"},
+            {"id": 9, "title": "FINAL FANTASY VIII", "wm_class": "steam_app_1026680", "focus": True}]
 
-    def run_gnome(self, fullscreen):
+    def run_gnome(self, windows, *actions):
         calls = []
 
         def fake_run(cmd, **_):
             method = cmd[cmd.index("--method") + 1].rsplit(".", 1)[1]
             calls.append([method] + cmd[cmd.index("--method") + 2:])
-            out = {"List": repr((self.LIST,)), "Details": repr((json.dumps({"id": 7, "fullscreen": fullscreen}),))}
-            return subprocess.CompletedProcess(cmd, 0, out.get(method, "()"), "")
+            out = repr((json.dumps(windows),)) if method == "List" else "(true,)"
+            return subprocess.CompletedProcess(cmd, 0, out, "")
 
-        with mock.patch.object(window, "run", fake_run):
-            window.Gnome().show()
-            window.Gnome().hide()
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": d}), \
+                mock.patch.object(window, "run", fake_run):
+            for action in actions:
+                getattr(window.Gnome(), action)()
         return calls
 
-    def test_show_raises_only_browser_live_windows(self):
-        self.assertEqual(self.run_gnome(False), [["List"], ["Unminimize", "7"], ["Details", "7"], ["Maximize", "7"],
-                                                 ["MakeAbove", "7"], ["Activate", "7"],
-                                                 ["List"], ["UnmakeAbove", "7"], ["Minimize", "7"]])
+    def test_show_focuses_the_overlay_and_hide_returns_to_the_game(self):
+        self.assertEqual(self.run_gnome(self.LIST, "show", "hide"),
+                         [["List"], ["activateById", "7"], ["List"], ["activateById", "9"]])
 
-    def test_show_keeps_a_fullscreen_overlay_fullscreen(self):
-        self.assertNotIn(["Maximize", "7"], self.run_gnome(True))
+    def test_never_changes_window_stacking(self):
+        methods = {c[0] for c in self.run_gnome(self.LIST, "show", "hide")}
+        self.assertFalse(methods & {"Minimize", "Unminimize", "Maximize", "MakeAbove", "UnmakeAbove"})
+
+    def test_hide_without_a_recorded_game_leaves_focus_alone(self):
+        self.assertEqual(self.run_gnome(self.LIST, "hide"), [])
 
 
 class ChooseTest(unittest.TestCase):
@@ -116,7 +120,8 @@ class ChooseTest(unittest.TestCase):
         self.assertEqual(self.choose(KDE_WAYLAND, ["gdbus"], "window"), "kwin")
         self.assertEqual(self.choose(KDE_WAYLAND, [], "window"), "follow")
         self.assertEqual(self.choose(GNOME_WAYLAND, ["dbus-send"], "window"), "follow")
-        with mock.patch.object(window, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, window.Gnome.IFACE, "")):
+        both = window.Gnome.CALLS[1] + " " + window.Gnome.ACTIVATE[1]
+        with mock.patch.object(window, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, both, "")):
             self.assertEqual(self.choose(GNOME_WAYLAND, ["gdbus"], "window"), "gnome")
         with mock.patch.object(window, "run", lambda *a, **k: subprocess.CompletedProcess(a, 1, "", "no such object")):
             self.assertEqual(self.choose(GNOME_WAYLAND, ["gdbus"], "window"), "follow")

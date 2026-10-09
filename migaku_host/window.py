@@ -244,51 +244,76 @@ class Windows(Backend):
 
 
 class Gnome(Backend):
-    """GNOME (Wayland or X11) through the Window Calls shell extension
-    (https://extensions.gnome.org/extension/4724/window-calls/), the only way another app can raise
-    a window on GNOME Wayland. Without the extension this falls back to follow mode."""
+    """GNOME through two shell extensions: Window Calls
+    (https://extensions.gnome.org/extension/4724/window-calls/) to list windows, and Activate
+    Window By Title (https://extensions.gnome.org/extension/5021/activate-window-by-title/) to
+    focus one with a proper timestamp, the only way another app can raise a window on GNOME
+    Wayland. The overlay is never minimised, maximised or kept above: changing a fullscreen
+    window's stacking from an extension once deadlocked GNOME Shell. Showing remembers the
+    focused window (the game) and hiding focuses it again. Without the extensions this falls
+    back to follow mode."""
     name, needs, desktops = "gnome", ("gdbus",), [("linux", "*", "gnome")]
-    PATH, IFACE = "/org/gnome/Shell/Extensions/Windows", "org.gnome.Shell.Extensions.Windows"
+    CALLS = ("/org/gnome/Shell/Extensions/Windows", "org.gnome.Shell.Extensions.Windows")
+    ACTIVATE = ("/de/lucaswerkmeister/ActivateWindowByTitle", "de.lucaswerkmeister.ActivateWindowByTitle")
 
     def missing(self):
         if not which("gdbus"):
             return ["gdbus"]
-        probe = run(["gdbus", "introspect", "--session", "--dest", "org.gnome.Shell", "--object-path", self.PATH],
-                    check=False, timeout=5)
-        return [] if self.IFACE in probe.stdout else ["the Window Calls GNOME extension (window-calls@domandoman.xyz)"]
+        missing = []
+        for (path, iface), uuid in ((self.CALLS, "window-calls@domandoman.xyz"),
+                                    (self.ACTIVATE, "activate-window-by-title@lucaswerkmeister.de")):
+            probe = run(["gdbus", "introspect", "--session", "--dest", "org.gnome.Shell", "--object-path", path],
+                        check=False, timeout=5)
+            if iface not in probe.stdout:
+                missing.append(f"the GNOME extension {uuid}")
+        return missing
 
-    def call(self, method, *args):
-        return run(["gdbus", "call", "--session", "--dest", "org.gnome.Shell", "--object-path", self.PATH,
-                    "--method", f"{self.IFACE}.{method}", *[str(a) for a in args]], timeout=5)
+    @staticmethod
+    def call(target, method, *args):
+        path, iface = target
+        return run(["gdbus", "call", "--session", "--dest", "org.gnome.Shell", "--object-path", path,
+                    "--method", f"{iface}.{method}", *[str(a) for a in args]], timeout=5)
 
-    def live_windows(self) -> list:
-        """IDs of browser windows titled "Migaku Live" (a terminal mentioning it is never moved)."""
+    def windows(self) -> list:
         # gdbus prints a GVariant tuple holding one JSON string: ('[{...}]',)
-        windows = json.loads(ast.literal_eval(self.call("List").stdout.strip())[0])
-        ids = [w["id"] for w in windows if LIVE_TITLE in (w.get("title") or "")
-               and any(b in (w.get("wm_class") or "").lower() for b in KWin.BROWSERS)]
-        log.info("window: %d live window(s): %s", len(ids), ids)
-        return ids
+        return json.loads(ast.literal_eval(self.call(self.CALLS, "List").stdout.strip())[0])
+
+    @staticmethod
+    def is_live(w) -> bool:
+        """A browser window titled "Migaku Live" (a terminal mentioning it is never touched)."""
+        return LIVE_TITLE in (w.get("title") or "") and any(b in (w.get("wm_class") or "").lower() for b in KWin.BROWSERS)
+
+    @staticmethod
+    def game_file():
+        from .util import runtime_dir
+        return runtime_dir() / "game-window"
+
+    def activate(self, wid) -> None:
+        self.call(self.ACTIVATE, "activateById", wid)
 
     def show(self):
-        ids = self.live_windows()
-        if not ids:
+        windows = self.windows()
+        live = [w["id"] for w in windows if self.is_live(w)]
+        log.info("window: %d live window(s): %s", len(live), live)
+        if not live:
             raise AppError("no Migaku Live window to raise")
-        for wid in ids:
-            self.call("Unminimize", wid)
-            details = json.loads(ast.literal_eval(self.call("Details", wid).stdout.strip())[0])
-            if not details.get("fullscreen"):  # the overlay's own instance starts fullscreen
-                self.call("Maximize", wid)
-            # Window Calls activates with timestamp 0, which GNOME may treat as focus stealing and
-            # leave behind a fullscreen game; keeping it above while shown puts it on top anyway.
-            self.call("MakeAbove", wid)
-            self.call("Activate", wid)
+        focused = next((w for w in windows if w.get("focus") and not self.is_live(w)), None)
+        if focused:
+            self.game_file().write_text(str(focused["id"]))
+            log.info("window: will return to %s (%s)", focused["id"], focused.get("wm_class"))
+        self.activate(live[0])
 
     def hide(self):
-        # Minimising hands focus back to the window underneath: the game.
-        for wid in self.live_windows():
-            self.call("UnmakeAbove", wid)
-            self.call("Minimize", wid)
+        try:
+            wid = int(self.game_file().read_text())
+        except (OSError, ValueError):
+            log.info("window: no game window recorded; leaving focus alone")
+            return
+        if any(w["id"] == wid for w in self.windows()):
+            self.activate(wid)
+        else:
+            log.info("window: game window %s is gone", wid)
+        self.game_file().unlink(missing_ok=True)
 
 
 class Follow(Backend):
@@ -322,6 +347,6 @@ def choose(d: Desktop, preferred: str = "auto") -> Backend:
 
 def describe_unsupported(d: Desktop) -> str:
     if d.os == "linux" and d.session == "wayland" and d.desktop == "gnome":
-        return "GNOME on Wayland doesn't let other apps raise windows; install the Window Calls extension"
+        return "GNOME on Wayland doesn't let other apps raise windows; install the Window Calls and Activate Window By Title extensions"
     return ""
 
