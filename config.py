@@ -22,6 +22,7 @@ ACTIONS = {
     "previous_frame": ("[", "older frame"),
     "next_frame": ("]", "newer frame"),
     "help": ("?", "this shortcut sheet"),
+    "back_to_game": ("g", "live window: hide it and resume the game"),
 }
 # Keys the Migaku extension uses on the page; binding them would fight with it.
 MIGAKU_KEYS = {"e", "q", "1", "2", "3", "4", "u", "k", "i"}
@@ -59,12 +60,14 @@ def parse(raw) -> tuple:
                 "profiles", "keybindings", "host"), "config")
 
     host = _expect(raw.get("host") or {}, dict, "host")
-    _only(host, ("capture", "window", "browser", "notifications"), "host")
+    _only(host, ("capture", "window", "browser", "notifications", "overlay_profile", "clipboard"), "host")
     host = {
         "capture": str(host.get("capture", "auto")),
         "window": str(host.get("window", "auto")),
         "browser": str(_expect(host.get("browser") or "", str, "host.browser")).strip(),
         "notifications": _expect(host.get("notifications", True), bool, "host.notifications"),
+        "overlay_profile": _expect(host.get("overlay_profile", True), bool, "host.overlay_profile"),
+        "clipboard": _expect(host.get("clipboard", True), bool, "host.clipboard"),
     }
     if host["capture"] not in CAPTURE_BACKENDS:
         raise ConfigError(f"host.capture: one of {', '.join(CAPTURE_BACKENDS)}, got {host['capture']!r}")

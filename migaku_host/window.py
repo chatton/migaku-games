@@ -276,7 +276,9 @@ class Gnome(Backend):
             raise AppError("no Migaku Live window to raise")
         for wid in ids:
             self.call("Unminimize", wid)
-            self.call("Maximize", wid)
+            details = json.loads(ast.literal_eval(self.call("Details", wid).stdout.strip())[0])
+            if not details.get("fullscreen"):  # the overlay's own instance starts fullscreen
+                self.call("Maximize", wid)
             self.call("Activate", wid)
 
     def hide(self):

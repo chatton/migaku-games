@@ -102,7 +102,9 @@
   /* Live mode (?live): one long-lived window over the game. The picture fills the window so it
      lines up with the game underneath; the toolbar slides up when the mouse nears the bottom. */
   body.live #bar { position: fixed; left: 0; right: 0; bottom: 0; transform: translateY(100%); transition: transform .15s; z-index: 4; }
-  body.live.peek #bar { transform: none; }
+  body.live.peek #bar, body.live.peek-hold #bar { transform: none; }
+  #btn-back { display: none; }
+  body.live #btn-back { display: inline-flex; }
   body.live #transcript { position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; }
   #waiting { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted);
     font: 15px system-ui, sans-serif; pointer-events: none; }
@@ -144,6 +146,9 @@
       </span>
     </div>
     <div class="group grow"><span id="status"></span></div>
+    <div class="group">
+      <button class="tb wide" id="btn-back" data-action="back_to_game"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg><span data-label="Back to game"></span></button>
+    </div>
     <div class="group">
       <a class="tb" href="/settings.html" target="_blank" data-tip="Config"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a>
       <button class="tb" id="btn-help" aria-pressed="false" data-action="help"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.6M12 17h.01"/></svg></button>
@@ -594,6 +599,7 @@ const actions = {
   previous_frame: () => $prev.click(),
   next_frame: () => $next.click(),
   help: () => $("btn-help").click(),
+  back_to_game: () => backToGame(),
 };
 let keymap = {};  // key -> action name
 let copyFrameOnCard = false;  // config: copy_frame_on_card
@@ -614,7 +620,7 @@ async function loadKeybindings() {
   }
   $("seg-caption").dataset.tip = `Caption size  ${cfg.keybindings.caption_smaller} / ${cfg.keybindings.caption_larger}`;
   const rows = Object.entries(cfg.keybindings).map(([action, key]) => [key, cfg.actions[action]]);
-  rows.push(["drag", "move a translation caption (double-click puts it back)"], ["your hotkey", "live window: hide it and go back to the game"]);
+  rows.push(["drag", "move a translation caption (double-click puts it back)"], ["your hotkey", "live window: hide it and go back to the game (or the Back to game button)"]);
   $("help-page").replaceChildren(...rows.flatMap(([key, about]) => {
     const dt = document.createElement("dt"), dd = document.createElement("dd");
     if (key.length <= 2) dt.appendChild(document.createElement("kbd")).textContent = key;
@@ -698,6 +704,15 @@ function updateNav() {
 }
 if (params.has("show")) toggleOcrText();
 
+// Back to the game: the server runs the hotkey client's --hide (minimise this window, resume a
+// paused game). Closing the window does the same, so the game is never left paused behind it.
+function backToGame() {
+  fetch("/api/back", { method: "POST" }).then(async (r) => {
+    if (!r.ok) notice((await r.json().catch(() => ({}))).error || "Couldn't go back to the game");
+  }).catch(() => notice("Couldn't reach the server"));
+}
+$("btn-back").onclick = backToGame;
+
 // Live mode: wait on the server for each new capture and show it. A waiting fetch isn't
 // subject to the timer throttling Brave applies to minimised windows, so a capture shows up
 // straight away even after the window has been hidden for a long time.
@@ -710,6 +725,10 @@ async function follow() {
       if (id && id !== after) {
         after = id;
         show(id);
+        // Show the toolbar for a moment with each capture, so its controls are easy to find.
+        document.body.classList.add("peek-hold");
+        clearTimeout(follow.peek);
+        follow.peek = setTimeout(() => document.body.classList.remove("peek-hold"), 4000);
       } else if (!id) {
         $("waiting").dataset.label = "Waiting for a capture… (run migaku_games.py --overlay)";
         $("waiting").hidden = false;
@@ -738,6 +757,7 @@ if (live) {
   document.title = "Migaku Live";  // names the window; must match LIVE_TITLE in migaku_games.py
   for (const ev of ["focus", "blur"]) addEventListener(ev, reportLive);
   document.addEventListener("visibilitychange", reportLive);
+  addEventListener("pagehide", () => navigator.sendBeacon("/api/back"));
   addEventListener("mousemove", (e) => document.body.classList.toggle("peek", e.clientY > innerHeight - 70 || !$("help").hidden));
   follow();
 } else if (frame) {

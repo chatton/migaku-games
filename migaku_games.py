@@ -85,6 +85,8 @@ def overlay(s: Session, engine, game) -> None:
         shot = Path(tmp) / "shot.png"
         with step("capture"):
             capture.capture(s.capture, shot, "screen")
+        if s.host.get("clipboard", True):
+            capture.copy_to_clipboard(s.desktop, shot)
         if s.profile.get("freeze"):
             with step("freeze"):
                 try:
@@ -96,7 +98,11 @@ def overlay(s: Session, engine, game) -> None:
                 frame = upload(s.server, shot, engine, game or s.profile.get("name"), wait=False)
             if not state.get("open"):
                 with step("open live window"):
-                    browser.open_url(s.desktop, s.server + "/viewer.html?live", app=True, configured=s.host.get("browser", ""))
+                    # Where the window backend can't fullscreen the live window, it gets its
+                    # own browser instance that starts fullscreen.
+                    fullscreen = s.host.get("overlay_profile", True) and s.window.name in ("gnome", "follow")
+                    browser.open_url(s.desktop, s.server + "/viewer.html?live", app=True,
+                                     configured=s.host.get("browser", ""), fullscreen=fullscreen)
                     if not wait_live(s.server, lambda st: st["open"], 30):
                         raise AppError("the live window didn't open within 30s; is the browser running? "
                                        "(first time: open it once from a terminal and authorise Migaku)")

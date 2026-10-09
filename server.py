@@ -24,6 +24,7 @@ API
   PUT    /api/frames/<id>/pin            {"pinned": true|false}
   DELETE /api/frames/<id>
   POST   /api/align                      {"ja", "en"} -> {"pairs": [{"ja": [s, e], "en": [s, e]}]} matched words
+  POST   /api/back                       hide the live window and resume a paused game (native server)
   POST   /api/log                        a line from a page for the server log (e.g. clipboard copies)
   POST   /debug                          viewer posts its DOM here (dev aid)
 """
@@ -37,6 +38,7 @@ import os
 import re
 import shutil
 import socketserver
+import subprocess
 import sys
 import threading
 import time
@@ -95,6 +97,24 @@ def write_json(path: Path, obj) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2))
     tmp.replace(path)
+
+
+def back_to_game():
+    """The viewer's "back to game": run the hotkey client's --hide, which minimises the live window
+    and resumes a paused game. Only a native server shares the desktop session to do that; on Linux
+    it goes through systemd-run so it gets the session's current environment (Wayland, D-Bus),
+    which a service started at login may lack."""
+    if Path("/.dockerenv").exists() or os.environ.get("container"):
+        return {"error": "the container can't reach the desktop; use your hotkey"}, 501
+    cmd = [sys.executable, str(Path(__file__).resolve().parent / "migaku_games.py"), "--hide"]
+    if sys.platform.startswith("linux") and shutil.which("systemd-run"):
+        cmd = ["systemd-run", "--user", "--quiet", "--collect", *cmd]
+    try:
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError as e:
+        return {"error": f"couldn't run the hotkey client: {e}"}, 500
+    log.info("back to game: %s", cmd)
+    return {"ok": True}, 202
 
 
 class Store:
@@ -445,6 +465,8 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/align":
             body = json.loads(self.read_body() or b"{}")
             return self.send_json(self.words.align(str(body.get("ja", ""))[:1000], str(body.get("en", ""))[:2000]))
+        if path == "/api/back":
+            return self.send_json(*back_to_game())
         if path == "/api/log":
             logging.getLogger("viewer").info("%s", self.read_body()[:2000].decode(errors="replace"))
             self.send_response(204)

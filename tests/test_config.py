@@ -27,6 +27,9 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(cfg["keybindings"]["translate"], "y")
         self.assertIs(cfg["copy_frame_on_card"], True)
         self.assertIs(cfg["translation_colours"], False)
+        self.assertIs(cfg["host"]["overlay_profile"], True)
+        self.assertIs(cfg["host"]["clipboard"], True)
+        self.assertEqual(cfg["keybindings"]["back_to_game"], "g")
         self.assertEqual(warnings, [])
 
     def test_missing_file_means_defaults_with_a_warning(self):

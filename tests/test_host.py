@@ -54,19 +54,26 @@ class GnomeWindowTest(unittest.TestCase):
                        {"id": 8, "title": "Migaku Live notes - Terminal", "wm_class": "org.gnome.Ptyxis"},
                        {"id": 9, "title": "FINAL FANTASY VIII", "wm_class": "steam_app_39150"}])
 
-    def test_show_raises_only_browser_live_windows(self):
+    def run_gnome(self, fullscreen):
         calls = []
 
         def fake_run(cmd, **_):
-            calls.append(cmd[cmd.index("--method") + 1].rsplit(".", 1)[1:] + cmd[cmd.index("--method") + 2:])
-            out = repr((self.LIST,)) if cmd[cmd.index("--method") + 1].endswith(".List") else "()"
-            return subprocess.CompletedProcess(cmd, 0, out, "")
+            method = cmd[cmd.index("--method") + 1].rsplit(".", 1)[1]
+            calls.append([method] + cmd[cmd.index("--method") + 2:])
+            out = {"List": repr((self.LIST,)), "Details": repr((json.dumps({"id": 7, "fullscreen": fullscreen}),))}
+            return subprocess.CompletedProcess(cmd, 0, out.get(method, "()"), "")
 
         with mock.patch.object(window, "run", fake_run):
             window.Gnome().show()
             window.Gnome().hide()
-        self.assertEqual(calls, [["List"], ["Unminimize", "7"], ["Maximize", "7"], ["Activate", "7"],
-                                 ["List"], ["Minimize", "7"]])
+        return calls
+
+    def test_show_raises_only_browser_live_windows(self):
+        self.assertEqual(self.run_gnome(False), [["List"], ["Unminimize", "7"], ["Details", "7"], ["Maximize", "7"],
+                                                 ["Activate", "7"], ["List"], ["Minimize", "7"]])
+
+    def test_show_keeps_a_fullscreen_overlay_fullscreen(self):
+        self.assertNotIn(["Maximize", "7"], self.run_gnome(True))
 
 
 class ChooseTest(unittest.TestCase):
@@ -190,6 +197,31 @@ class FreezeTest(unittest.TestCase):
     def test_resume_with_nothing_frozen_is_a_no_op(self):
         with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": d}):
             freeze.resume()
+
+
+class OverlayTest(unittest.TestCase):
+    def test_fullscreen_overlay_gets_its_own_profile(self):
+        d = linux(GNOME_WAYLAND)
+        with mock.patch.object(desktop, "which", lambda n: "/usr/bin/" + n if n == "brave-browser" else None), \
+                mock.patch("migaku_host.browser.which", lambda n: "/usr/bin/" + n if n == "brave-browser" else None), \
+                mock.patch("subprocess.Popen") as popen:
+            from migaku_host import browser
+            browser.open_url(d, "http://localhost:8765/viewer.html?live", app=True, fullscreen=True)
+            cmd = popen.call_args[0][0]
+            self.assertEqual(cmd[0], "brave-browser")
+            self.assertTrue(cmd[1].startswith("--user-data-dir=") and cmd[1].endswith("overlay-browser"))
+            self.assertEqual(cmd[2:], ["--start-fullscreen", "--app=http://localhost:8765/viewer.html?live"])
+            browser.open_url(d, "http://x/", app=True)
+            self.assertEqual(popen.call_args[0][0], ["brave-browser", "--start-maximized", "--app=http://x/"])
+
+    def test_clipboard_tool_per_session(self):
+        with tempfile.NamedTemporaryFile(suffix=".png") as f:
+            for env, tools, expected in [(GNOME_WAYLAND, ["wl-copy", "xclip"], "wl-copy"), (X11_XFCE, ["xclip"], "xclip"),
+                                         (GNOME_WAYLAND, ["xclip"], "xclip"), (GNOME_WAYLAND, [], None)]:
+                with mock.patch.object(capture, "which", lambda n, t=tools: "/usr/bin/" + n if n in t else None), \
+                        mock.patch("subprocess.Popen") as popen:
+                    capture.copy_to_clipboard(linux(env), Path(f.name))
+                    self.assertEqual(popen.call_args[0][0][0] if popen.called else None, expected)
 
 
 class UtilTest(unittest.TestCase):

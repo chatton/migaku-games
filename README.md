@@ -122,9 +122,14 @@ tools/native.sh status        # venv, JMdict, service, and whether the server an
    to the game instead, the live window is still "shown": the next press hides it, and the one
    after captures. Hiding it with the hotkey avoids that.)
 
-On GNOME the hotkey raises and maximises the live window through the
+On GNOME the hotkey raises the live window through the
 [Window Calls](https://extensions.gnome.org/extension/4724/window-calls/) extension, and the next
-press minimises it again. Without that extension (GNOME on Wayland doesn't let one app raise
+press minimises it again. GNOME can't make another app's window fullscreen, so there the live
+window runs in its own Brave instance (profile in `~/.local/state/migaku-games/overlay-browser`)
+that starts fullscreen over the game; log into Migaku once in that window (`host.overlay_profile`).
+The live window's **Back to game** button (or `g`), and closing the window, hide it and resume a
+paused game (native server). Each capture is also put on the clipboard (`wl-copy` on Wayland,
+`xclip` on X11; `host.clipboard`), so Ctrl+V in Migaku's card creator adds the frame. Without that extension (GNOME on Wayland doesn't let one app raise
 another's window), the client runs in **follow mode**: the hotkey still captures, and the live
 window (kept on a second screen, or one Alt+Tab away) shows the new frame; a notification says
 it's ready.

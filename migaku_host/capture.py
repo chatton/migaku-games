@@ -4,6 +4,7 @@ which programs it needs; choose() picks the first that fits, or the one named in
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 import urllib.parse
@@ -216,6 +217,24 @@ def choose(d: Desktop, preferred: str = "auto") -> Backend:
             return b
     hint = {"kde": "spectacle", "gnome": "python3-gobject (portal) or gnome-screenshot", "sway": "grim", "hyprland": "grim"}.get(d.desktop, "maim or scrot")
     raise AppError(f"no screenshot tool found for {d.desktop}/{d.session}; install {hint}")
+
+
+def copy_to_clipboard(d: Desktop, image: Path) -> None:
+    """Put the capture on the clipboard, so Ctrl+V in Migaku's card creator adds it however the
+    card was started. wl-copy (Wayland) or xclip (X11); skipped with a log line otherwise."""
+    if d.os != "linux":
+        return
+    if d.session == "wayland" and which("wl-copy"):
+        cmd = ["wl-copy", "--type", "image/png"]
+    elif which("xclip"):
+        cmd = ["xclip", "-selection", "clipboard", "-t", "image/png", "-i"]
+    else:
+        log.info("clipboard: no wl-copy or xclip; not copying the capture")
+        return
+    with open(image, "rb") as f:
+        # wl-copy and xclip stay in the background to serve the clipboard; don't wait on them.
+        subprocess.Popen(cmd, stdin=f, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    log.info("clipboard: capture copied (%s)", cmd[0])
 
 
 def capture(backend: Backend, dest: Path, mode: str) -> None:

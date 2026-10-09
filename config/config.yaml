@@ -52,6 +52,13 @@ host:
   browser: ""
   # Desktop notifications for progress; errors are always notified.
   notifications: true
+  # Where the window backend can't make the live window fullscreen (GNOME, follow), open it in
+  # its own browser instance (profile in ~/.local/state/migaku-games/overlay-browser) that starts
+  # fullscreen. Log into Migaku once in that window.
+  overlay_profile: true
+  # Put each capture on the clipboard (wl-copy on Wayland, xclip on X11), so Ctrl+V in Migaku's
+  # card creator adds the frame however the card was started.
+  clipboard: true
 
 # Viewer shortcuts (KeyboardEvent.key values). Unlisted actions keep their defaults:
 #   translate: y            translate the hovered dialogue box
