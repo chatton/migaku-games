@@ -100,7 +100,7 @@ def overlay(s: Session, engine, game) -> None:
         try:
             with step("upload"):
                 frame = upload(s.server, shot, engine, game or s.profile.get("name"), wait=False)
-            if not state.get("open"):
+            def open_live():
                 with step("open live window"):
                     # Where the window backend can't fullscreen the live window, it gets its
                     # own browser instance that starts fullscreen.
@@ -111,12 +111,26 @@ def overlay(s: Session, engine, game) -> None:
                     if not wait_live(s.server, lambda st: st["open"], 30):
                         raise AppError("the live window didn't open within 30s; is the browser running? "
                                        "(first time: open it once from a terminal and authorise Migaku)")
-            # Raise it once it shows the new picture, so the old one never flashes up.
-            with step("wait for the picture"):
-                if not wait_live(s.server, lambda st: st["frame"] == frame["id"], 3):
-                    log.warning("the live window hasn't shown frame %s yet; raising anyway", frame["id"])
-            with step(f"show window ({s.window.name})"):
-                s.window.show()
+
+            def show_live():
+                # Raise it once it shows the new picture, so the old one never flashes up.
+                with step("wait for the picture"):
+                    if not wait_live(s.server, lambda st: st["frame"] == frame["id"], 3):
+                        log.warning("the live window hasn't shown frame %s yet; raising anyway", frame["id"])
+                with step(f"show window ({s.window.name})"):
+                    s.window.show()
+
+            if not state.get("open"):
+                open_live()
+            try:
+                show_live()
+            except AppError as e:
+                # The server still counts a just-closed window as open for a few seconds.
+                if "no Migaku Live window" not in str(e):
+                    raise
+                log.info("the live window is gone; opening a new one")
+                open_live()
+                show_live()
             if s.window.can_raise:
                 request(s.server, "/api/live", data={"shown": True})
             else:
