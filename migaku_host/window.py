@@ -32,6 +32,10 @@ class Backend:
     def missing(self) -> list:
         return [n for n in self.needs if not which(n)]
 
+    def note_focus(self) -> None:
+        """Called before the capture, while the game still has focus (the screenshot portal takes
+        it briefly); backends that return to the game afterwards remember it here."""
+
     def show(self) -> None:
         raise NotImplementedError
 
@@ -291,16 +295,19 @@ class Gnome(Backend):
     def activate(self, wid) -> None:
         self.call(self.ACTIVATE, "activateById", wid)
 
-    def show(self):
-        windows = self.windows()
-        live = [w["id"] for w in windows if self.is_live(w)]
-        log.info("window: %d live window(s): %s", len(live), live)
-        if not live:
-            raise AppError("no Migaku Live window to raise")
-        focused = next((w for w in windows if w.get("focus") and not self.is_live(w)), None)
+    def note_focus(self):
+        focused = next((w for w in self.windows() if w.get("focus") and not self.is_live(w)), None)
         if focused:
             self.game_file().write_text(str(focused["id"]))
             log.info("window: will return to %s (%s)", focused["id"], focused.get("wm_class"))
+        else:
+            log.info("window: no focused window to return to")
+
+    def show(self):
+        live = [w["id"] for w in self.windows() if self.is_live(w)]
+        log.info("window: %d live window(s): %s", len(live), live)
+        if not live:
+            raise AppError("no Migaku Live window to raise")
         self.activate(live[0])
 
     def hide(self):

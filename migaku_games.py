@@ -81,6 +81,10 @@ def overlay(s: Session, engine, game) -> None:
     log.info("live window: %s", state)
     if state.get("shown"):
         return hide(s)
+    try:
+        s.window.note_focus()  # before the capture: the screenshot portal takes focus briefly
+    except AppError as e:
+        log.warning("window: couldn't note the focused window: %s", e)
     with tempfile.TemporaryDirectory() as tmp:
         shot = Path(tmp) / "shot.png"
         with step("capture"):

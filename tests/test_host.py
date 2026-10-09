@@ -70,11 +70,11 @@ class GnomeWindowTest(unittest.TestCase):
         return calls
 
     def test_show_focuses_the_overlay_and_hide_returns_to_the_game(self):
-        self.assertEqual(self.run_gnome(self.LIST, "show", "hide"),
-                         [["List"], ["activateById", "7"], ["List"], ["activateById", "9"]])
+        self.assertEqual(self.run_gnome(self.LIST, "note_focus", "show", "hide"),
+                         [["List"], ["List"], ["activateById", "7"], ["List"], ["activateById", "9"]])
 
     def test_never_changes_window_stacking(self):
-        methods = {c[0] for c in self.run_gnome(self.LIST, "show", "hide")}
+        methods = {c[0] for c in self.run_gnome(self.LIST, "note_focus", "show", "hide")}
         self.assertFalse(methods & {"Minimize", "Unminimize", "Maximize", "MakeAbove", "UnmakeAbove"})
 
     def test_hide_without_a_recorded_game_leaves_focus_alone(self):
