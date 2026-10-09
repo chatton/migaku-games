@@ -120,17 +120,24 @@ def overlay(s: Session, engine, game) -> None:
                 with step(f"show window ({s.window.name})"):
                     s.window.show()
 
-            if not state.get("open"):
+            opened = not state.get("open")
+            if opened:
                 open_live()
-            try:
-                show_live()
-            except AppError as e:
-                # The server still counts a just-closed window as open for a few seconds.
-                if "no Migaku Live window" not in str(e):
-                    raise
-                log.info("the live window is gone; opening a new one")
-                open_live()
-                show_live()
+            for attempt in range(20):
+                try:
+                    show_live()
+                    break
+                except AppError as e:
+                    if "no Migaku Live window" not in str(e):
+                        raise
+                    if not opened:
+                        # The server still counts a just-closed window as open for a few seconds.
+                        log.info("the live window is gone; opening a new one")
+                        open_live()
+                        opened = True
+                    elif attempt == 19:
+                        raise
+                    time.sleep(0.25)  # a just-opened window can take a moment to appear
             if s.window.can_raise:
                 request(s.server, "/api/live", data={"shown": True})
             else:
