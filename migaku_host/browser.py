@@ -54,16 +54,17 @@ def is_overlay_process(pid) -> bool:
 
 
 def open_url(d: Desktop, url: str, app: bool, configured: str = "", overlay: bool = False, profile=True) -> None:
-    """`overlay`: open the live window in the overlay's own browser instance and named profile, as
-    a normal maximised window, so its toolbar and the Migaku extension button stay at hand. A
-    separate instance keeps it apart from your everyday browsing and its Migaku login."""
+    """`overlay`: open the live window in the overlay's own browser instance and named profile,
+    started fullscreen (Chromium applies that only when it starts the instance; the page also
+    goes fullscreen itself on the first click or key). A separate instance keeps it apart from
+    your everyday browsing and its Migaku login; --setup-browser opens it as a normal window."""
     if d.os == "mac" and not configured and not app:
         run(["open", "-a", MAC_APP, url])
         return
     if overlay:
         cmd = browser_command(d, configured) + [f"--user-data-dir={overlay_profile(profile)}",
                                                 f"--profile-directory={OVERLAY_PROFILE_NAME}",
-                                                "--new-window", "--start-maximized", url]
+                                                "--new-window", "--start-fullscreen", url]
     else:
         cmd = browser_command(d, configured) + (["--start-maximized", f"--app={url}"] if app else [url])
     log.info("browser: %s", cmd)

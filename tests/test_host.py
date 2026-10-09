@@ -216,7 +216,7 @@ class OverlayTest(unittest.TestCase):
             cmd = popen.call_args[0][0]
             self.assertEqual(cmd[0], "brave-browser")
             self.assertTrue(cmd[1].startswith("--user-data-dir=") and cmd[1].endswith("overlay-browser"))
-            self.assertEqual(cmd[2:], ["--profile-directory=Migaku Games", "--new-window", "--start-maximized",
+            self.assertEqual(cmd[2:], ["--profile-directory=Migaku Games", "--new-window", "--start-fullscreen",
                                        "http://localhost:8765/viewer.html?live"])
             browser.open_url(d, "http://x/", app=True)
             self.assertEqual(popen.call_args[0][0], ["brave-browser", "--start-maximized", "--app=http://x/"])

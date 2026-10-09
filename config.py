@@ -23,6 +23,7 @@ ACTIONS = {
     "next_frame": ("]", "newer frame"),
     "help": ("?", "this shortcut sheet"),
     "back_to_game": ("g", "live window: hide it and resume the game"),
+    "toggle_fullscreen": ("f", "fullscreen on/off"),
 }
 # Keys the Migaku extension uses on the page; binding them would fight with it.
 MIGAKU_KEYS = {"e", "q", "1", "2", "3", "4", "u", "k", "i"}

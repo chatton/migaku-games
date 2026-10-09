@@ -155,6 +155,7 @@
     </div>
     <div class="group grow"><span id="status"></span></div>
     <div class="group">
+      <button class="tb" id="btn-fullscreen" data-action="toggle_fullscreen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
       <button class="tb wide" id="btn-back" data-action="back_to_game"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg><span data-label="Back to game"></span></button>
     </div>
     <div class="group">
@@ -620,6 +621,7 @@ const actions = {
   next_frame: () => $next.click(),
   help: () => $("btn-help").click(),
   back_to_game: () => backToGame(),
+  toggle_fullscreen: () => toggleFullscreen(),
 };
 let keymap = {};  // key -> action name
 let copyFrameOnCard = false;  // config: copy_frame_on_card
@@ -732,6 +734,21 @@ function backToGame() {
   }).catch(() => notice("Couldn't reach the server"));
 }
 $("btn-back").onclick = backToGame;
+
+// Fullscreen covers the browser's own bars and the desktop dock. Browsers only allow it from a
+// click or key press, so the live window also requests it on the first one.
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else document.documentElement.requestFullscreen().catch((e) => notice(`Fullscreen refused: ${e.message}`));
+}
+$("btn-fullscreen").onclick = (e) => { e.stopPropagation(); toggleFullscreen(); };
+if (live) {
+  const goFullscreen = () => {
+    if (!document.fullscreenElement && innerHeight < screen.height) document.documentElement.requestFullscreen().catch(() => {});
+  };
+  addEventListener("pointerdown", goFullscreen, { once: true, capture: true });
+  addEventListener("keydown", goFullscreen, { once: true, capture: true });
+}
 
 // Live mode: wait on the server for each new capture and show it. A waiting fetch isn't
 // subject to the timer throttling Brave applies to minimised windows, so a capture shows up
