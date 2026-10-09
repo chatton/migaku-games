@@ -190,6 +190,7 @@ addEventListener("unhandledrejection", (e) => serverLog(`unhandled: ${e.reason?.
 // Is Migaku active on this page? (Not authorised for the site, or not installed, is a common snag.)
 setTimeout(() => serverLog(`loaded; Migaku ${document.getElementById("MigakuShadowDom") ? "active" : "NOT active (authorise it for this site?)"}; ${navigator.userAgent}`), 5000);
 const live = params.has("live");
+const setup = params.has("setup");  // --setup-browser: newest frame, with Migaku toolbar status
 let frame = params.get("frame");
 let dims = null;  // picture size, known before OCR finishes
 const stage = document.getElementById("stage");
@@ -319,7 +320,8 @@ function translateViaMigaku(text) {
     if (!root) throw new Error("Migaku extension not active on this page");
     // The panel's inputs work while it stays hidden. Never open it: Migaku focuses its
     // input when shown, which then swallows our keyboard shortcuts.
-    if (!root.querySelector(".Toolbar__translator")) throw new Error("Migaku translator not found");
+    // Migaku only builds its toolbar (and the translator in it) while the toolbar is pinned.
+    if (!root.querySelector(".Toolbar__translator")) throw new Error("Migaku's toolbar isn't pinned: press Alt+X once");
     const ja = root.querySelector('.Toolbar__translator input[lang="ja"]');
     const en = root.querySelector('.Toolbar__translator input[lang="en"]');
     en.value = "";
@@ -782,6 +784,18 @@ if (live) {
   follow();
 } else if (frame) {
   show(frame);
+} else if (setup) {
+  // --setup-browser: the newest frame, plus a running check of Migaku's state in this profile.
+  api("/api/frames").then((frames) => frames[0] ? show(frames[0].id) : notice("No frames yet: capture one first"));
+  const report = () => {
+    const root = document.getElementById("MigakuShadowDom")?.shadowRoot;
+    const state = !root ? "Migaku isn't active here yet: log in, then turn it on for this site"
+      : !root.querySelector(".Toolbar__translator") ? "Migaku is active. Press Alt+X to pin its toolbar"
+      : "Ready: Migaku's toolbar is pinned. Close this window";
+    $("waiting").dataset.label = state;
+    $("waiting").hidden = false;
+  };
+  setInterval(report, 1000);
 }
 </script>
 </body>

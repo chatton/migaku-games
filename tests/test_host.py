@@ -207,21 +207,27 @@ class FreezeTest(unittest.TestCase):
 
 
 class OverlayTest(unittest.TestCase):
-    def test_fullscreen_overlay_gets_its_own_profile(self):
+    def test_overlay_window_gets_its_own_named_profile(self):
         d = linux(GNOME_WAYLAND)
-        with mock.patch.object(desktop, "which", lambda n: "/usr/bin/" + n if n == "brave-browser" else None), \
-                mock.patch("migaku_host.browser.which", lambda n: "/usr/bin/" + n if n == "brave-browser" else None), \
+        with mock.patch("migaku_host.browser.which", lambda n: "/usr/bin/" + n if n == "brave-browser" else None), \
                 mock.patch("subprocess.Popen") as popen:
             from migaku_host import browser
-            browser.open_url(d, "http://localhost:8765/viewer.html?live", app=True, fullscreen=True)
+            browser.open_url(d, "http://localhost:8765/viewer.html?live", app=False, overlay=True)
             cmd = popen.call_args[0][0]
             self.assertEqual(cmd[0], "brave-browser")
             self.assertTrue(cmd[1].startswith("--user-data-dir=") and cmd[1].endswith("overlay-browser"))
-            self.assertEqual(cmd[2:], ["--start-fullscreen", "--app=http://localhost:8765/viewer.html?live"])
+            self.assertEqual(cmd[2:], ["--profile-directory=Migaku Games", "--new-window", "--start-maximized",
+                                       "http://localhost:8765/viewer.html?live"])
             browser.open_url(d, "http://x/", app=True)
             self.assertEqual(popen.call_args[0][0], ["brave-browser", "--start-maximized", "--app=http://x/"])
-            browser.open_url(d, "http://x/", app=True, fullscreen=True, profile="~/brave-overlay")
+            browser.open_url(d, "http://x/", app=False, overlay=True, profile="~/brave-overlay")
             self.assertEqual(popen.call_args[0][0][1], "--user-data-dir=" + os.path.expanduser("~/brave-overlay"))
+
+    def test_overlay_browser_window_is_recognised_by_its_process(self):
+        win = {"id": 5, "title": "Migaku Live - Brave", "wm_class": "brave-browser", "pid": 4242}
+        with mock.patch("migaku_host.browser.is_overlay_process", lambda pid: pid == 4242):
+            self.assertTrue(window.Gnome.is_live(win))
+            self.assertFalse(window.Gnome.is_live({**win, "pid": 1}))
 
     def test_clipboard_tool_per_session(self):
         with tempfile.NamedTemporaryFile(suffix=".png") as f:

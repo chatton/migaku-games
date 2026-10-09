@@ -52,10 +52,11 @@ host:
   browser: ""
   # Desktop notifications for progress; errors are always notified.
   notifications: true
-  # Where the window backend can't make the live window fullscreen (GNOME, follow), open it in
-  # its own browser instance that starts fullscreen. true: profile in
-  # ~/.local/state/migaku-games/overlay-browser; a path: that browser profile directory
-  # (--user-data-dir); false: the normal browser, not fullscreen. Log into Migaku there once.
+  # On GNOME (and in follow mode), open the live window in its own browser instance, profile
+  # "Migaku Games", as a normal maximised window (toolbar and Migaku button visible). true: its
+  # data in ~/.local/state/migaku-games/overlay-browser; a path: that browser data directory
+  # (--user-data-dir); false: an app window in your everyday browser. Log into Migaku there once
+  # (python3 migaku_games.py --setup-browser).
   overlay_profile: true
   # Put each capture on the clipboard (wl-copy on Wayland, xclip on X11), so Ctrl+V in Migaku's
   # card creator adds the frame however the card was started.

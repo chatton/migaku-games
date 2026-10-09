@@ -102,12 +102,12 @@ def overlay(s: Session, engine, game) -> None:
                 frame = upload(s.server, shot, engine, game or s.profile.get("name"), wait=False)
             def open_live():
                 with step("open live window"):
-                    # Where the window backend can't fullscreen the live window, it gets its
-                    # own browser instance that starts fullscreen.
+                    # On GNOME (and in follow mode) the live window gets its own browser
+                    # instance and named profile, as a normal maximised window.
                     profile = s.host.get("overlay_profile", True)
-                    fullscreen = profile is not False and s.window.name in ("gnome", "follow")
-                    browser.open_url(s.desktop, s.server + "/viewer.html?live", app=True,
-                                     configured=s.host.get("browser", ""), fullscreen=fullscreen, profile=profile)
+                    own = profile is not False and s.window.name in ("gnome", "follow")
+                    browser.open_url(s.desktop, s.server + "/viewer.html?live", app=not own,
+                                     configured=s.host.get("browser", ""), overlay=own, profile=profile)
                     if not wait_live(s.server, lambda st: st["open"], 30):
                         raise AppError("the live window didn't open within 30s; is the browser running? "
                                        "(first time: open it once from a terminal and authorise Migaku)")
@@ -204,6 +204,22 @@ def doctor(server: str) -> int:
     return 0
 
 
+SETUP_STEPS = """Setting up the overlay's browser profile ("Migaku Games"):
+  1. Log into Migaku in the study.migaku.com tab.
+  2. In the localhost:8765 tab, press Alt+X: Migaku's toolbar appears and stays pinned.
+     (Dismiss any Migaku pop-up first; the page says when the toolbar is pinned.)
+  3. Close the window. The next hotkey press opens the overlay in the same profile."""
+
+
+def setup_browser(s: Session) -> int:
+    ensure_server(s.server, notify=lambda t, b: notify(s.desktop, t, b))
+    s.load_config()
+    browser.open_setup_browser(s.desktop, s.server, s.host.get("browser", ""), s.host.get("overlay_profile", True))
+    print(SETUP_STEPS)
+    s.notify("Set up the overlay browser", "Log into Migaku, then press Alt+X on the migaku-games tab.")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--overlay", action="store_true", help="capture into the live window, or hide it if shown")
@@ -217,6 +233,8 @@ def main() -> int:
     p.add_argument("--no-open", action="store_true", help="don't open the viewer")
     p.add_argument("--resume", action="store_true", help="unfreeze a game left frozen by --overlay")
     p.add_argument("--doctor", action="store_true", help="check this machine's setup and show where logs are")
+    p.add_argument("--setup-browser", action="store_true",
+                   help="open the overlay's browser profile normally, to log into Migaku and pin its toolbar")
     p.add_argument("-v", "--verbose", action="store_true", help="show the detailed log on the console too")
     args = p.parse_args()
 
@@ -234,6 +252,8 @@ def main() -> int:
         if args.resume:
             freeze.resume()
             return 0
+        if args.setup_browser:
+            return setup_browser(s)
         with single_instance() as got_lock:
             if not got_lock:
                 log.warning("another run is still in progress (double press?); ignoring this one")

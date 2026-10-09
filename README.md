@@ -126,9 +126,11 @@ On GNOME the hotkey focuses the live window through two shell extensions,
 [Window Calls](https://extensions.gnome.org/extension/4724/window-calls/) (to list windows) and
 [Activate Window By Title](https://extensions.gnome.org/extension/5021/activate-window-by-title/)
 (to focus one), and the next press focuses the game again. It never minimises or restacks the
-fullscreen overlay: doing that from an extension once deadlocked GNOME Shell. GNOME can't make another app's window fullscreen, so there the live
-window runs in its own Brave instance (profile in `~/.local/state/migaku-games/overlay-browser`)
-that starts fullscreen over the game; log into Migaku once in that window (`host.overlay_profile`).
+overlay: doing that to a fullscreen window from an extension once deadlocked GNOME Shell. There the live window runs in its own Brave instance and profile ("Migaku Games", data in
+`~/.local/state/migaku-games/overlay-browser`) as a normal maximised window, so the Migaku button
+is at hand. Set it up once with `python3 migaku_games.py --setup-browser`: log into Migaku, then
+press Alt+X on the migaku-games tab to pin Migaku's toolbar, which holds the translator
+(`host.overlay_profile`).
 The live window's **Back to game** button (or `g`), and closing the window, hide it and resume a
 paused game (native server). Each capture is also put on the clipboard (`wl-copy` on Wayland,
 `xclip` on X11; `host.clipboard`), so Ctrl+V in Migaku's card creator adds the frame. Without that extension (GNOME on Wayland doesn't let one app raise

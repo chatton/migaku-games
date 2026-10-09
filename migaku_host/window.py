@@ -284,11 +284,15 @@ class Gnome(Backend):
 
     @staticmethod
     def is_live(w) -> bool:
-        """The live viewer's app window: a browser window opened with --app on viewer.html (its
-        window class says so) and titled "Migaku Live". A normal browser tab showing the viewer,
-        or a terminal mentioning it, is never touched."""
+        """The live viewer's window: a browser window titled "Migaku Live" that is either an app
+        window on viewer.html (its window class says so) or belongs to the overlay's browser
+        profile. The viewer open in an everyday browser tab, or a terminal mentioning it, is never
+        touched."""
+        from .browser import is_overlay_process
         cls = (w.get("wm_class") or "").lower()
-        return (w.get("title") or "") == LIVE_TITLE and "viewer.html" in cls and any(b in cls for b in KWin.BROWSERS)
+        if not (w.get("title") or "").startswith(LIVE_TITLE) or not any(b in cls for b in KWin.BROWSERS):
+            return False
+        return "viewer.html" in cls or is_overlay_process(w.get("pid"))
 
     @staticmethod
     def game_file():

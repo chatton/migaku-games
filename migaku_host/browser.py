@@ -30,6 +30,10 @@ def browser_command(d: Desktop, configured: str = "") -> list:
     raise AppError("Brave not found (brave-browser, brave, or the com.brave.Browser Flatpak); set host.browser in the config")
 
 
+# The named Brave profile inside the overlay's own browser directory (Chromium --profile-directory).
+OVERLAY_PROFILE_NAME = "Migaku Games"
+
+
 def overlay_profile(configured=True) -> Path:
     """The live window's browser profile directory (Chromium's --user-data-dir): the configured
     path (host.overlay_profile), or by default its own under the state directory. Log into
@@ -39,15 +43,29 @@ def overlay_profile(configured=True) -> Path:
     return state_dir() / "overlay-browser"
 
 
-def open_url(d: Desktop, url: str, app: bool, configured: str = "", fullscreen: bool = False, profile=True) -> None:
-    """`fullscreen`: open the app window in its own browser instance (a separate profile), started
-    fullscreen. Chromium applies start-up flags only to a new browser process, and where the
-    desktop can't fullscreen another app's window (GNOME) that's the only way to cover the game."""
+def is_overlay_process(pid) -> bool:
+    """Whether a browser process runs the overlay profile (Linux; window backends use it to tell
+    the overlay's window from other browser windows)."""
+    try:
+        argv = Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="replace").split("\0")
+    except (OSError, ValueError):
+        return False
+    return f"--profile-directory={OVERLAY_PROFILE_NAME}" in argv
+
+
+def open_url(d: Desktop, url: str, app: bool, configured: str = "", overlay: bool = False, profile=True) -> None:
+    """`overlay`: open the live window in the overlay's own browser instance and named profile, as
+    a normal maximised window, so its toolbar and the Migaku extension button stay at hand. A
+    separate instance keeps it apart from your everyday browsing and its Migaku login."""
     if d.os == "mac" and not configured and not app:
         run(["open", "-a", MAC_APP, url])
         return
-    extra = [f"--user-data-dir={overlay_profile(profile)}", "--start-fullscreen"] if fullscreen else ["--start-maximized"]
-    cmd = browser_command(d, configured) + ([*extra, f"--app={url}"] if app else [url])
+    if overlay:
+        cmd = browser_command(d, configured) + [f"--user-data-dir={overlay_profile(profile)}",
+                                                f"--profile-directory={OVERLAY_PROFILE_NAME}",
+                                                "--new-window", "--start-maximized", url]
+    else:
+        cmd = browser_command(d, configured) + (["--start-maximized", f"--app={url}"] if app else [url])
     log.info("browser: %s", cmd)
     try:
         # Detached, so the browser outlives this command.
@@ -55,3 +73,13 @@ def open_url(d: Desktop, url: str, app: bool, configured: str = "", fullscreen: 
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kwargs)
     except OSError as e:
         raise AppError(f"couldn't start the browser ({cmd[0]}): {e}") from None
+
+
+def open_setup_browser(d: Desktop, server: str, configured: str = "", profile=True) -> None:
+    """The overlay profile's browser window with Migaku's site to log in, and the newest frame
+    to pin Migaku's toolbar."""
+    cmd = browser_command(d, configured) + [f"--user-data-dir={overlay_profile(profile)}",
+                                            f"--profile-directory={OVERLAY_PROFILE_NAME}", "--new-window",
+                                            "https://study.migaku.com", f"{server}/viewer.html?setup"]
+    log.info("browser: %s", cmd)
+    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
