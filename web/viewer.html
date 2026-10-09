@@ -762,6 +762,9 @@ async function follow() {
       if (id && id !== after) {
         after = id;
         show(id);
+        // Fullscreen with each capture. Browsers allow it without a click only for sites listed in
+        // the AutomaticFullscreenAllowedForUrls policy; otherwise the first click or key does it.
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
         // Show the toolbar for a moment with each capture, so its controls are easy to find.
         document.body.classList.add("peek-hold");
         clearTimeout(follow.peek);

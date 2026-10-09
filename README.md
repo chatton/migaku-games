@@ -130,7 +130,10 @@ overlay: doing that to a fullscreen window from an extension once deadlocked GNO
 `~/.local/state/migaku-games/overlay-browser`) as a normal maximised window, so the Migaku button
 is at hand. Set it up once with `python3 migaku_games.py --setup-browser`: log into Migaku, then
 press Alt+X on the migaku-games tab to pin Migaku's toolbar, which holds the translator
-(`host.overlay_profile`).
+(`host.overlay_profile`). The window starts fullscreen; to let it return to fullscreen on every
+capture without a click, allow the server in Brave's managed policy, e.g.
+`/etc/brave/policies/managed/migaku-games.json` with
+`{"AutomaticFullscreenAllowedForUrls": ["http://localhost:8765"]}`.
 The live window's **Back to game** button (or `g`), and closing the window, hide it and resume a
 paused game (native server). Each capture is also put on the clipboard (`wl-copy` on Wayland,
 `xclip` on X11; `host.clipboard`), so Ctrl+V in Migaku's card creator adds the frame. Without that extension (GNOME on Wayland doesn't let one app raise
