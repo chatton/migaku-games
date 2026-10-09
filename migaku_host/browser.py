@@ -30,19 +30,23 @@ def browser_command(d: Desktop, configured: str = "") -> list:
     raise AppError("Brave not found (brave-browser, brave, or the com.brave.Browser Flatpak); set host.browser in the config")
 
 
-def overlay_profile() -> Path:
-    """The live window's own browser profile (log into Migaku there once)."""
+def overlay_profile(configured=True) -> Path:
+    """The live window's browser profile directory (Chromium's --user-data-dir): the configured
+    path (host.overlay_profile), or by default its own under the state directory. Log into
+    Migaku there once."""
+    if isinstance(configured, str) and configured.strip():
+        return Path(os.path.expanduser(configured.strip()))
     return state_dir() / "overlay-browser"
 
 
-def open_url(d: Desktop, url: str, app: bool, configured: str = "", fullscreen: bool = False) -> None:
+def open_url(d: Desktop, url: str, app: bool, configured: str = "", fullscreen: bool = False, profile=True) -> None:
     """`fullscreen`: open the app window in its own browser instance (a separate profile), started
     fullscreen. Chromium applies start-up flags only to a new browser process, and where the
     desktop can't fullscreen another app's window (GNOME) that's the only way to cover the game."""
     if d.os == "mac" and not configured and not app:
         run(["open", "-a", MAC_APP, url])
         return
-    extra = [f"--user-data-dir={overlay_profile()}", "--start-fullscreen"] if fullscreen else ["--start-maximized"]
+    extra = [f"--user-data-dir={overlay_profile(profile)}", "--start-fullscreen"] if fullscreen else ["--start-maximized"]
     cmd = browser_command(d, configured) + ([*extra, f"--app={url}"] if app else [url])
     log.info("browser: %s", cmd)
     try:

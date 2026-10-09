@@ -104,9 +104,10 @@ def overlay(s: Session, engine, game) -> None:
                 with step("open live window"):
                     # Where the window backend can't fullscreen the live window, it gets its
                     # own browser instance that starts fullscreen.
-                    fullscreen = s.host.get("overlay_profile", True) and s.window.name in ("gnome", "follow")
+                    profile = s.host.get("overlay_profile", True)
+                    fullscreen = profile is not False and s.window.name in ("gnome", "follow")
                     browser.open_url(s.desktop, s.server + "/viewer.html?live", app=True,
-                                     configured=s.host.get("browser", ""), fullscreen=fullscreen)
+                                     configured=s.host.get("browser", ""), fullscreen=fullscreen, profile=profile)
                     if not wait_live(s.server, lambda st: st["open"], 30):
                         raise AppError("the live window didn't open within 30s; is the browser running? "
                                        "(first time: open it once from a terminal and authorise Migaku)")

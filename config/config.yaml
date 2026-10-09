@@ -53,8 +53,9 @@ host:
   # Desktop notifications for progress; errors are always notified.
   notifications: true
   # Where the window backend can't make the live window fullscreen (GNOME, follow), open it in
-  # its own browser instance (profile in ~/.local/state/migaku-games/overlay-browser) that starts
-  # fullscreen. Log into Migaku once in that window.
+  # its own browser instance that starts fullscreen. true: profile in
+  # ~/.local/state/migaku-games/overlay-browser; a path: that browser profile directory
+  # (--user-data-dir); false: the normal browser, not fullscreen. Log into Migaku there once.
   overlay_profile: true
   # Put each capture on the clipboard (wl-copy on Wayland, xclip on X11), so Ctrl+V in Migaku's
   # card creator adds the frame however the card was started.

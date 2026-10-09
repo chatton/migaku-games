@@ -52,6 +52,7 @@ class DetectTest(unittest.TestCase):
 class GnomeWindowTest(unittest.TestCase):
     LIST = [{"id": 7, "title": "Migaku Live", "wm_class": "brave-localhost__viewer.html-Default"},
             {"id": 8, "title": "Migaku Live notes - Terminal", "wm_class": "org.gnome.Ptyxis"},
+            {"id": 6, "title": "Migaku Live - Brave", "wm_class": "brave-browser"},
             {"id": 9, "title": "FINAL FANTASY VIII", "wm_class": "steam_app_1026680", "focus": True}]
 
     def run_gnome(self, windows, *actions):
@@ -219,6 +220,8 @@ class OverlayTest(unittest.TestCase):
             self.assertEqual(cmd[2:], ["--start-fullscreen", "--app=http://localhost:8765/viewer.html?live"])
             browser.open_url(d, "http://x/", app=True)
             self.assertEqual(popen.call_args[0][0], ["brave-browser", "--start-maximized", "--app=http://x/"])
+            browser.open_url(d, "http://x/", app=True, fullscreen=True, profile="~/brave-overlay")
+            self.assertEqual(popen.call_args[0][0][1], "--user-data-dir=" + os.path.expanduser("~/brave-overlay"))
 
     def test_clipboard_tool_per_session(self):
         with tempfile.NamedTemporaryFile(suffix=".png") as f:

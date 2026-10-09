@@ -66,7 +66,7 @@ def parse(raw) -> tuple:
         "window": str(host.get("window", "auto")),
         "browser": str(_expect(host.get("browser") or "", str, "host.browser")).strip(),
         "notifications": _expect(host.get("notifications", True), bool, "host.notifications"),
-        "overlay_profile": _expect(host.get("overlay_profile", True), bool, "host.overlay_profile"),
+        "overlay_profile": _expect(host.get("overlay_profile", True), (bool, str), "host.overlay_profile"),
         "clipboard": _expect(host.get("clipboard", True), bool, "host.clipboard"),
     }
     if host["capture"] not in CAPTURE_BACKENDS:

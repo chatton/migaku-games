@@ -284,8 +284,11 @@ class Gnome(Backend):
 
     @staticmethod
     def is_live(w) -> bool:
-        """A browser window titled "Migaku Live" (a terminal mentioning it is never touched)."""
-        return LIVE_TITLE in (w.get("title") or "") and any(b in (w.get("wm_class") or "").lower() for b in KWin.BROWSERS)
+        """The live viewer's app window: a browser window opened with --app on viewer.html (its
+        window class says so) and titled "Migaku Live". A normal browser tab showing the viewer,
+        or a terminal mentioning it, is never touched."""
+        cls = (w.get("wm_class") or "").lower()
+        return (w.get("title") or "") == LIVE_TITLE and "viewer.html" in cls and any(b in cls for b in KWin.BROWSERS)
 
     @staticmethod
     def game_file():
