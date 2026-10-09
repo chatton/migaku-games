@@ -103,6 +103,8 @@
      lines up with the game underneath; the toolbar slides up when the mouse nears the bottom. */
   body.live #bar { position: fixed; left: 0; right: 0; bottom: 0; transform: translateY(100%); transition: transform .15s; z-index: 4; }
   body.live.peek #bar, body.live.peek-hold #bar { transform: none; }
+  /* A red frame round the live window, so the frozen picture is never mistaken for the game. */
+  body.live::after { content: ""; position: fixed; inset: 0; border: 4px solid #e5322d; pointer-events: none; z-index: 10; }
   #btn-back { display: none; }
   body.live #btn-back { display: inline-flex; }
   body.live #transcript { position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; }
