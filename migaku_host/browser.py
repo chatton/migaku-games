@@ -47,10 +47,11 @@ def is_overlay_process(pid) -> bool:
     """Whether a browser process runs the overlay profile (Linux; window backends use it to tell
     the overlay's window from other browser windows)."""
     try:
-        argv = Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="replace").split("\0")
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="replace")
     except (OSError, ValueError):
         return False
-    return f"--profile-directory={OVERLAY_PROFILE_NAME}" in argv
+    # Chromium rewrites its process title, joining the arguments into one string.
+    return f"--profile-directory={OVERLAY_PROFILE_NAME}" in cmdline.replace("\0", " ")
 
 
 def open_url(d: Desktop, url: str, app: bool, configured: str = "", overlay: bool = False, profile=True) -> None:

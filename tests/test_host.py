@@ -231,6 +231,14 @@ class OverlayTest(unittest.TestCase):
             browser.open_url(d, "http://x/", app=False, overlay=True, profile="~/brave-overlay")
             self.assertEqual(popen.call_args[0][0][1], "--user-data-dir=" + os.path.expanduser("~/brave-overlay"))
 
+    def test_overlay_process_matches_a_rewritten_process_title(self):
+        from migaku_host import browser
+        title = b"/opt/brave.com/brave/brave --user-data-dir=/x/overlay-browser --profile-directory=Migaku Games --start-fullscreen\0"
+        split = b"/opt/brave.com/brave/brave\0--profile-directory=Migaku Games\0"
+        for data, expected in ((title, True), (split, True), (b"/opt/brave.com/brave/brave\0", False)):
+            with mock.patch.object(browser.Path, "read_bytes", lambda self, d=data: d):
+                self.assertIs(browser.is_overlay_process(42), expected)
+
     def test_overlay_browser_window_is_recognised_by_its_process(self):
         win = {"id": 5, "title": "Migaku Live - Brave", "wm_class": "brave-browser", "pid": 4242}
         with mock.patch("migaku_host.browser.is_overlay_process", lambda pid: pid == 4242):
