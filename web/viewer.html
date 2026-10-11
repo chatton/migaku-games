@@ -793,6 +793,16 @@ function reportLive() {
   });
 }
 if (live) {
+  // A browser started by the hotkey can load this page before its extensions are up, and Migaku
+  // never attaches to a page loaded before it. Reload (a few times, spaced out) until it does.
+  setTimeout(() => {
+    if (document.getElementById("MigakuShadowDom")) { sessionStorage.removeItem("migakuReloads"); return; }
+    const tries = Number(sessionStorage.getItem("migakuReloads") || 0);
+    if (tries >= 3) return serverLog("Migaku still not active after 3 reloads");
+    sessionStorage.setItem("migakuReloads", String(tries + 1));
+    serverLog(`Migaku not active yet; reloading (try ${tries + 1})`);
+    location.reload();
+  }, 4000 * (Number(sessionStorage.getItem("migakuReloads") || 0) + 1));
   document.body.classList.add("live");
   document.title = "Migaku Live";  // names the window; must match LIVE_TITLE in migaku_games.py
   for (const ev of ["focus", "blur"]) addEventListener(ev, reportLive);
